@@ -1,0 +1,6 @@
+*
+!requirements.txt
+!app/**
+!templates/**
+!tests/**
+templates/*.private.json

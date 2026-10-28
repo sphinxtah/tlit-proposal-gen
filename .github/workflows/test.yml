@@ -1,0 +1,13 @@
+name: Test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application
+        run: docker build -t tlit-proposal-gen-test .
+      - name: Run backend and document generation tests
+        run: docker run --rm tlit-proposal-gen-test python -m pytest -q -p no:cacheprovider

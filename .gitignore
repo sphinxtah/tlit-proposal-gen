@@ -1,0 +1,20 @@
+__pycache__/
+.pytest_cache/
+data/
+output/
+tmp/
+.env
+*.pyc
+
+# Client source documents, local overrides, credentials, and database backups
+/*.pptx
+/*.docx
+private/
+*.private.json
+*.sqlite3*
+*.db
+*.pem
+*.key
+.env.*
+!.env.example
+compose.override.yaml

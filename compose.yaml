@@ -1,0 +1,18 @@
+name: tlit-proposal-gen
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:${TLIT_PORT:-8088}:8000"
+    volumes:
+      - proposal-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  proposal-data:

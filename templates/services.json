@@ -1,0 +1,162 @@
+[
+  {
+    "description": "Document software and hardware changes",
+    "frequency": "As performed",
+    "status": "Included"
+  },
+  {
+    "description": "Monthly reports of work accomplished, work in progress, etc.",
+    "frequency": "Monthly",
+    "status": "Included"
+  },
+  {
+    "description": "Manage Servers",
+    "frequency": "Ongoing",
+    "status": "Included"
+  },
+  {
+    "description": "Monitor all Server services",
+    "frequency": "Ongoing",
+    "status": "Included"
+  },
+  {
+    "description": "Keep Service Packs, Patches and Hotfixes current as per company policy",
+    "frequency": "Monthly",
+    "status": "Included"
+  },
+  {
+    "description": "Check event log of every server and identify any potential issues",
+    "frequency": "As things appear",
+    "status": "Included"
+  },
+  {
+    "description": "Monitor hard drive free space on server",
+    "frequency": "Ongoing",
+    "status": "Included"
+  },
+  {
+    "description": "Exchange Server user/mailbox management",
+    "frequency": "As needed",
+    "status": "Not applicable"
+  },
+  {
+    "description": "Monitor Active Directory replication",
+    "frequency": "As needed",
+    "status": "Not applicable"
+  },
+  {
+    "description": "Reboot servers if needed",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Run defrag and chkdsk on all drives",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Scheduled off time server maintenance",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Check status of backups",
+    "frequency": "Daily",
+    "status": "Not applicable"
+  },
+  {
+    "description": "Alert Customer to dangerous conditions\n-Memory running low\n-Hard drive showing sign of failure\n-Hard drive running out of disk space\n-Controllers losing interrupts\n-Network Cards report unusual collision activity",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Clean and prune directory structure, keep efficient and active",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Disaster Recovery of Server(s)",
+    "frequency": "As Needed",
+    "status": "Not applicable"
+  },
+  {
+    "description": "Monitor & Manage Desktops- Keep Service Packs, Patches and Hotfixes current as per company policy",
+    "frequency": "Ongoing",
+    "status": "Included"
+  },
+  {
+    "description": "Manage Network Printers",
+    "frequency": "Ongoing",
+    "status": "Excluded"
+  },
+  {
+    "description": "Manage Switches, Routers",
+    "frequency": "Ongoing",
+    "status": "Included"
+  },
+  {
+    "description": "Manage Mobile Devices",
+    "frequency": "Ongoing",
+    "status": "Excluded"
+  },
+  {
+    "description": "Check router logs",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Performance Monitoring/Capacity Planning",
+    "frequency": "Ongoing",
+    "status": "Included"
+  },
+  {
+    "description": "Monitor DSU/TSU, switches, hubs and internet connectivity, and make sure everything is operational (available for SNMP manageable devices only)",
+    "frequency": "Ongoing",
+    "status": "Included"
+  },
+  {
+    "description": "Maintain office connectivity to the Internet",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Check firewall logs",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "SOPHOS End point Protection and SOC",
+    "frequency": "As needed",
+    "status": "Not applicable"
+  },
+  {
+    "description": "SOPHOS Email Security",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Confirm that SaaS backups are working",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Create new directories, shares and security groups, new accounts, disable/delete old accounts, manage account policies",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Permissions and file system management",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Set up new users including login restrictions, passwords, security, applications",
+    "frequency": "As needed",
+    "status": "Included"
+  },
+  {
+    "description": "Set up and change security for users and applications",
+    "frequency": "Ongoing",
+    "status": "Included"
+  }
+]

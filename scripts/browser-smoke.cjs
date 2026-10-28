@@ -1,0 +1,45 @@
+const {chromium}=require('playwright');
+const {spawnSync}=require('node:child_process');
+const crypto=require('node:crypto');
+const fs=require('node:fs');
+const password=crypto.randomBytes(24).toString('hex');
+const username='qa-'+crypto.randomBytes(6).toString('hex');
+function python(code){const r=spawnSync('docker',['compose','-p','tlit-proposal-gen','exec','-T','app','python','-'],{input:code,encoding:'utf8'});if(r.status)throw Error(r.stderr);}
+(async()=>{
+ let browser;let savedId;
+ try{
+ python(`from app.main import connect\nimport hashlib,secrets\nsalt=secrets.token_bytes(16)\nwith connect() as db: db.execute('INSERT INTO users VALUES(?,?,?)',(${JSON.stringify(username)},salt.hex(),hashlib.scrypt(${JSON.stringify(password)}.encode(),salt=salt,n=16384,r=8,p=1).hex()))`);
+ browser=await chromium.launch({headless:true,channel:'chrome'});
+ const page=await browser.newPage({viewport:{width:1600,height:1050}}),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:8088');
+ await page.locator('#loginForm [name=username]').fill(username);
+ await page.locator('#loginForm [name=password]').fill(password);
+ await page.locator('#loginForm button').click();
+ await page.locator('#studio').waitFor({state:'visible'});
+ await page.locator('#example').click();
+ await page.waitForFunction(()=>document.querySelector('#monthly').textContent==='$410.00');
+ await page.locator('[name=client]').fill('QA browser smoke');
+ const saved=page.waitForResponse(r=>r.url().endsWith('/api/proposals')&&r.request().method()==='POST');
+ await page.locator('#save').click();savedId=(await(await saved).json()).id;
+ await page.locator('#draftState').filter({hasText:'All changes saved'}).waitFor();
+ const downloadPromise=page.waitForEvent('download');await page.locator('#generate').click();
+ const download=await downloadPromise;await download.saveAs('tmp/browser-export.zip');
+ await page.locator('#client').scrollIntoViewIfNeeded();
+ await page.screenshot({path:'tmp/ui-desktop.png'});
+ await page.locator('[name=billing_mode]').selectOption('users');
+ await page.locator('[name=user_rate]').fill('100');
+ await page.waitForFunction(()=>document.querySelector('#monthly').textContent==='$290.00');
+ await page.locator('[name=billing_mode]').selectOption('devices');
+ await page.waitForFunction(()=>document.querySelector('#monthly').textContent==='$410.00');
+ await page.setViewportSize({width:390,height:844});await page.locator('#client').scrollIntoViewIfNeeded();
+ await page.screenshot({path:'tmp/ui-mobile.png'});
+ const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
+ if(overflow)throw Error('Mobile horizontal overflow');
+ if(errors.length)throw Error(errors.join('\n'));
+ console.log('Browser passed: login, example, save, export, billing modes, mobile layout; no JavaScript errors.');
+ }finally{
+ if(browser)await browser.close();
+ python(`from app.main import connect\nwith connect() as db:\n db.execute('DELETE FROM users WHERE username=?',(${JSON.stringify(username)},))\n db.execute('DELETE FROM sessions WHERE username=?',(${JSON.stringify(username)},))\n db.execute('DELETE FROM proposals WHERE id=?',(${JSON.stringify(savedId||'')},))`);
+ }
+})().catch(e=>{console.error(e);process.exitCode=1;});
