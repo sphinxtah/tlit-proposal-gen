@@ -3,7 +3,7 @@
 Validated locally on October 27, 2026.
 
 - `tlit-proposal-gen-app-1` is healthy and bound to localhost port 8088.
-- Five automated test cases pass, covering sample totals, billing modes and proportional taxable discount allocation, invalid inputs, login/write protection, saved draft reload/update, ZIP contents, client-name replacement, blank payment fields, retained nonrenewal text, and long-content generation/pagination.
+- Ten automated test cases pass, covering sample totals, billing modes and proportional taxable discount allocation, invalid inputs, login/write protection, saved draft reload/update, ZIP contents, client-name replacement, blank payment fields, retained nonrenewal text, and long-content generation/pagination.
 - Browser smoke test passed in Chrome: login, Example Company load, draft save, ZIP download, changing billing modes, and mobile width. No JavaScript runtime errors or mobile horizontal overflow.
 - Generated example PDF: nine pages, every page rendered and visually reviewed. Schedule A, services, inventory, rates, signature blocks and blank payment authorization are present.
 - Generated example PPTX: fifteen slides, rendered using PowerPoint. Source marketing slides retained; generated discovery, pricing and terms slides reviewed for fit.
@@ -12,4 +12,6 @@ Validated locally on October 27, 2026.
 - Temporary browser-test user, session and draft removed. No default credentials remain.
 - No deployment to Acadia has occurred. No existing unrelated Docker containers were started, stopped, edited or deleted.
 
-Known limits: local account creation/reset is via CLI; simultaneous draft edits use last-save-wins; drafts allow exports with review warnings. The PDF's payment page preserves the source “7st” typo and existing fees pending a wording review. The static marketing deck contains original statistics/claims that need normal business approval before use.
+Known limits: local account creation/reset is via CLI; stale draft saves are rejected; drafts allow exports with review warnings. The PDF's payment page preserves the source “7st” typo and existing fees pending a wording review. The static marketing deck contains original statistics/claims that need normal business approval before use.
+
+History additions: tested migration idempotency, archived snapshot restore, exact export bytes, one-year/leap-year boundary, explicit deletion, bulk preview counts and confirmation guards. Browser test covers snapshot view, restore, historical download and individual revision deletion. Generated text slides re-rendered and reviewed with centered Arial text and the original TeamLogic IT logo header.

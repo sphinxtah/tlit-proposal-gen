@@ -7,25 +7,38 @@ import secrets
 import sqlite3
 import time
 import zipfile
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, HTTPException, Request, Response, Depends, Header
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from app.models import Proposal, quote
 from app.generate import pptx_bytes, pdf_bytes, TEMPLATES, VERSION
+from app.version import APP_VERSION
+from app.storage import (connect, initialize, append_revision, decode_revision,
+                         compress_history, cutoff, cleanup_plan, execute_cleanup, stamp)
 
-DATA=Path(os.environ.get('DATA_DIR','data'));DATA.mkdir(exist_ok=True)
-DB=DATA/'proposals.sqlite3'
-def connect():
-    db=sqlite3.connect(DB);db.row_factory=sqlite3.Row;return db
-with connect() as db:
-    db.executescript('''CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, client TEXT, payload TEXT, updated TEXT);
-    CREATE TABLE IF NOT EXISTS users(username TEXT PRIMARY KEY, salt TEXT, hash TEXT);
-    CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, username TEXT, expires REAL);
-    CREATE TABLE IF NOT EXISTS attempts(ip TEXT PRIMARY KEY, count INTEGER, started REAL);''')
-app=FastAPI(title='TeamLogic IT Proposal Generator',version='0.1.0')
+initialize()
+
+async def maintenance():
+    while True:
+        try:await asyncio.to_thread(compress_history)
+        except Exception:logging.exception('History compression failed; original records retained')
+        await asyncio.sleep(24*3600)
+
+@asynccontextmanager
+async def lifespan(app):
+    task=asyncio.create_task(maintenance())
+    yield
+    task.cancel()
+    try:await task
+    except asyncio.CancelledError:pass
+
+app=FastAPI(title='TeamLogic IT Proposal Generator',version=APP_VERSION,lifespan=lifespan)
 
 def authenticated(request:Request):
     token=request.cookies.get('tlit_session','')
@@ -41,7 +54,7 @@ class Credentials(BaseModel):
     password:str=Field(min_length=1,max_length=200)
 
 @app.get('/api/health')
-def health():return {'status':'ok'}
+def health():return {'status':'ok','version':APP_VERSION}
 
 @app.post('/api/login')
 def login(c:Credentials,request:Request,response:Response):
@@ -88,36 +101,128 @@ def pricing(p:Proposal,user=Depends(authenticated)):
 
 @app.get('/api/proposals')
 def listing(user=Depends(authenticated)):
-    with connect() as db:return [dict(x) for x in db.execute('SELECT id,client,updated FROM proposals ORDER BY updated DESC')]
+    with connect() as db:return [dict(x) for x in db.execute('SELECT id,client,updated,version FROM proposals ORDER BY updated DESC')]
 
 @app.get('/api/proposals/{pid}')
-def read(pid:str,user=Depends(authenticated)):
-    with connect() as db:r=db.execute('SELECT payload FROM proposals WHERE id=?',(pid,)).fetchone()
+def read(pid:str,response:Response,user=Depends(authenticated)):
+    with connect() as db:r=db.execute('SELECT payload,version FROM proposals WHERE id=?',(pid,)).fetchone()
     if not r:raise HTTPException(404,'Proposal not found.')
+    response.headers['ETag']=str(r['version'])
     return json.loads(r['payload'])
+
+def check_version(db,pid,expected):
+    row=db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone()
+    if not row:raise HTTPException(404,'Proposal not found.')
+    if expected is None:raise HTTPException(428,'Reload the proposal before changing it.')
+    if str(row['version'])!=expected:raise HTTPException(409,'This proposal changed in another session. Reload it before saving.')
+    return row
 
 @app.post('/api/proposals')
 def create(p:Proposal,user=Depends(authenticated)):
-    pid=str(uuid4());return save(pid,p,user)
+    q=pricing(p,user);pid=str(uuid4())
+    with connect() as db:
+        db.execute('INSERT INTO proposals(id,version) VALUES(?,0)',(pid,))
+        return append_revision(db,pid,p.model_dump(mode='json'),user,quote=q)
 
 @app.put('/api/proposals/{pid}')
-def save(pid:str,p:Proposal,user=Depends(authenticated)):
-    pricing(p,user)
+def save(pid:str,p:Proposal,user=Depends(authenticated),if_match:str|None=Header(default=None)):
+    q=pricing(p,user)
     with connect() as db:
-        db.execute("INSERT OR REPLACE INTO proposals VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))",(pid,p.client,p.model_dump_json()))
-    return {'id':pid}
+        db.execute('BEGIN IMMEDIATE');check_version(db,pid,if_match)
+        return append_revision(db,pid,p.model_dump(mode='json'),user,quote=q)
+
+@app.get('/api/proposals/{pid}/history')
+def history(pid:str,user=Depends(authenticated)):
+    with connect() as db:
+        if not db.execute('SELECT 1 FROM proposals WHERE id=?',(pid,)).fetchone():raise HTTPException(404,'Proposal not found.')
+        rows=[dict(r) for r in db.execute('SELECT id,version,created_at,author,kind,restored_from,encoding FROM revisions WHERE proposal_id=? ORDER BY version DESC',(pid,))]
+        for row in rows:
+            row['exports']=[dict(e) for e in db.execute('SELECT id,created_at,author,app_version,template_version FROM exports WHERE revision_id=? ORDER BY created_at DESC',(row['id'],))]
+        return rows
+
+def revision(db,pid,rid):
+    row=db.execute('SELECT * FROM revisions WHERE proposal_id=? AND id=?',(pid,rid)).fetchone()
+    if not row:raise HTTPException(404,'Revision not found.')
+    return row
+
+@app.get('/api/proposals/{pid}/history/{rid}')
+def read_revision(pid:str,rid:str,user=Depends(authenticated)):
+    with connect() as db:return decode_revision(revision(db,pid,rid))
+
+@app.post('/api/proposals/{pid}/history/{rid}/restore')
+def restore(pid:str,rid:str,user=Depends(authenticated),if_match:str|None=Header(default=None)):
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE');check_version(db,pid,if_match)
+        old=revision(db,pid,rid);p=Proposal(**decode_revision(old)['proposal']);q=pricing(p,user)
+        return append_revision(db,pid,p.model_dump(mode='json'),user,'restore',restored_from=old['version'],quote=q)
+
+@app.get('/api/exports/{eid}')
+def download_export(eid:str,user=Depends(authenticated)):
+    with connect() as db:row=db.execute('SELECT payload,sha256 FROM exports WHERE id=?',(eid,)).fetchone()
+    if not row:raise HTTPException(404,'Export not found.')
+    if hashlib.sha256(row['payload']).hexdigest()!=row['sha256']:raise HTTPException(500,'Export integrity check failed.')
+    return Response(row['payload'],media_type='application/zip',headers={'Content-Disposition':'attachment; filename="TeamLogic-Proposal.zip"'})
+
+class Confirmation(BaseModel):
+    confirmation:str
+
+@app.delete('/api/proposals/{pid}')
+def delete_proposal(pid:str,c:Confirmation,user=Depends(authenticated),if_match:str|None=Header(default=None)):
+    if c.confirmation!='DELETE':raise HTTPException(422,'Type DELETE to confirm.')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE');check_version(db,pid,if_match)
+        db.execute('DELETE FROM proposals WHERE id=?',(pid,))
+    return {'deleted':True}
+
+@app.delete('/api/proposals/{pid}/history/{rid}')
+def delete_revision(pid:str,rid:str,c:Confirmation,user=Depends(authenticated),if_match:str|None=Header(default=None)):
+    if c.confirmation!='DELETE':raise HTTPException(422,'Type DELETE to confirm.')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE');current=check_version(db,pid,if_match);old=revision(db,pid,rid)
+        if old['version']==current['version']:raise HTTPException(409,'The current revision cannot be removed alone. Delete the whole proposal instead.')
+        db.execute('DELETE FROM revisions WHERE id=?',(rid,))
+    return {'deleted':True}
+
+class CleanupConfirmation(Confirmation):
+    cutoff:str
+    token:str
+
+@app.get('/api/retention/preview')
+def preview_cleanup(user=Depends(authenticated)):
+    with connect() as db:return cleanup_plan(db,cutoff(2))
+
+@app.post('/api/retention/delete')
+def delete_old(c:CleanupConfirmation,user=Depends(authenticated)):
+    if c.confirmation!='DELETE OLD HISTORY':raise HTTPException(422,'Type DELETE OLD HISTORY to confirm.')
+    # Accept only the exact older boundary previewed by the user, never newer records.
+    from datetime import datetime, timezone
+    try:boundary=datetime.fromisoformat(c.cutoff.replace('Z','+00:00'))
+    except ValueError:raise HTTPException(422,'Invalid cutoff.')
+    if boundary.tzinfo is None or boundary>datetime.fromisoformat(cutoff(2).replace('Z','+00:00')):raise HTTPException(422,'Cutoff must be at least two years ago.')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE');plan=cleanup_plan(db,c.cutoff)
+        if not hmac.compare_digest(plan['token'],c.token):raise HTTPException(409,'Records changed. Preview cleanup again.')
+        execute_cleanup(db,c.cutoff)
+    return plan
 
 @app.post('/api/generate')
-def generate(p:Proposal,user=Depends(authenticated)):
+def generate(p:Proposal,response:Response,user=Depends(authenticated),proposal_id:str|None=None,if_match:str|None=Header(default=None)):
     q=pricing(p,user)
-    output=io.BytesIO()
-    with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as z:
-        z.writestr('Proposal.pptx',pptx_bytes(p,q))
-        z.writestr('Managed-IT-Services.pdf',pdf_bytes(p,q))
-        z.writestr('proposal-data.json',p.model_dump_json(indent=2))
-        z.writestr('generation-manifest.json',json.dumps({'template_version':VERSION,'generated_by':user,'warnings':q['warnings'],'monthly':str(q['monthly'])},indent=2))
-    output.seek(0)
-    return StreamingResponse(output,media_type='application/zip',headers={'Content-Disposition':'attachment; filename="TeamLogic-Proposal.zip"'})
+    ppt=pptx_bytes(p,q);pdf=pdf_bytes(p,q)
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if proposal_id:check_version(db,proposal_id,if_match)
+        else:
+            proposal_id=str(uuid4());db.execute('INSERT INTO proposals(id,version) VALUES(?,0)',(proposal_id,))
+        saved=append_revision(db,proposal_id,p.model_dump(mode='json'),user,'export',quote=q)
+        output=io.BytesIO()
+        with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as z:
+            z.writestr('Proposal.pptx',ppt);z.writestr('Managed-IT-Services.pdf',pdf)
+            z.writestr('proposal-data.json',p.model_dump_json(indent=2))
+            z.writestr('generation-manifest.json',json.dumps({'app_version':APP_VERSION,'template_version':VERSION,'generated_by':user,'generated_at':stamp(),**saved,'warnings':q['warnings'],'monthly':str(q['monthly'])},indent=2))
+        raw=output.getvalue()
+        db.execute('INSERT INTO exports VALUES(?,?,?,?,?,?,?,?)',(str(uuid4()),saved['revision_id'],stamp(),user,VERSION,APP_VERSION,raw,hashlib.sha256(raw).hexdigest()))
+    return Response(raw,media_type='application/zip',headers={'Content-Disposition':'attachment; filename="TeamLogic-Proposal.zip"','X-Proposal-Id':proposal_id,'X-Proposal-Version':str(saved['version'])})
 
 app.mount('/static',StaticFiles(directory=Path(__file__).parent/'static'),name='static')
 @app.get('/')

@@ -1,4 +1,4 @@
-# TeamLogic IT Proposal Studio
+# TeamLogic IT Proposal Studio v0.1.0
 
 Internal intake, pricing, editable PowerPoint proposals, and PDF managed services agreements. Runs without Microsoft Office in production.
 
@@ -78,4 +78,6 @@ Store the backup securely with a copy of `templates/`. Restore only to a stopped
 - `docs/PLAN.md`: scope, architecture, known template issues and next increments.
 - `docs/TAX-RESEARCH.md`: sourced tax findings and implementation limits.
 
-Both users share drafts. There is no autosave or concurrent-edit conflict prevention in this first version. Save explicitly; the latest save wins. Session lifetime is eight hours. Passwords use salted scrypt hashes, cookies are HttpOnly/SameSite Strict, writes require a custom request header, and login attempts are rate-limited. Accounts currently have equal access.
+Both users share drafts and version history. Save explicitly; exporting also saves a revision and retains the exact documents. Stale saves are rejected if another session changed the proposal. History older than one year is compressed automatically. Individual deletion and previewed bulk deletion of history older than two years are available in Version history. See [history and retention](docs/HISTORY.md) for precise behavior and backup considerations.
+
+Session lifetime is eight hours. Passwords use salted scrypt hashes, cookies are HttpOnly/SameSite Strict, writes require a custom request header, and login attempts are rate-limited. Accounts currently have equal access, including deletion.

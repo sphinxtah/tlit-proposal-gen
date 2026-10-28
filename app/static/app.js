@@ -1,12 +1,12 @@
 const $=s=>document.querySelector(s), form=$('#proposalForm');
-let currentId=null, timer, quoteSequence=0;
+let currentId=null, currentVersion=null, timer, quoteSequence=0, writing=false;
 const currency=v=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(v);
 const numeric=new Set(['users','workstations','servers','term_months','renewal_months','notice_days']);
 const moneyFields=new Set(['user_rate','workstation_rate','server_rate','onboarding','discount','tax_percent','hourly_rate','after_hours_rate']);
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Phoenix',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(url,method='GET',data){
- const response=await fetch(url,{method,headers:{'Content-Type':'application/json','X-TLIT-Request':'1'},body:data===undefined?undefined:JSON.stringify(data)});
+async function api(url,method='GET',data,version=null){
+ const response=await fetch(url,{method,headers:{'Content-Type':'application/json','X-TLIT-Request':'1',...(version===null?{}:{'If-Match':String(version)})},body:data===undefined?undefined:JSON.stringify(data)});
  if(!response.ok){let e=await response.json();if(response.status===401&&url!='/api/login')showLogin();throw Error(typeof e.detail==='string'?e.detail:JSON.stringify(e.detail));}return response;
 }
 function message(text,error=false){$('#message').textContent=text;$('#message').classList.toggle('error',error);}
@@ -51,12 +51,25 @@ async function updateQuote(){
   $('#warnings').innerHTML=q.warnings.map(w=>`<div class="warning">${escapeHtml(w)}</div>`).join('');
  }catch(e){if(seq===quoteSequence){$('#monthly').textContent='—';$('#warnings').textContent=e.message;}}
 }
-async function refreshList(){const saved=await(await api('/api/proposals')).json();$('#saved').replaceChildren();for(const p of saved){const b=document.createElement('button');b.textContent=p.client;b.title=p.updated;b.onclick=async()=>{if(!canReplace())return;try{fill(await(await api('/api/proposals/'+p.id)).json());currentId=p.id;$('#draftState').textContent='Saved proposal';message('Draft loaded.');}catch(e){message(e.message,true);}};$('#saved').append(b);}}
-function canReplace(){return !$('#draftState').textContent.includes('unsaved changes')||confirm('Discard unsaved changes?');}
-$('#new').onclick=()=>{if(!canReplace())return;currentId=null;fill({proposal_date:today()});$('#draftState').textContent='New proposal · not saved';message('');};
-$('#example').onclick=async()=>{if(!canReplace())return;try{fill(await(await api('/api/example')).json());currentId=null;dirty();message('Reference example loaded. Review the open questions before sending.');}catch(e){message(e.message,true);}};
+async function refreshList(){const saved=await(await api('/api/proposals')).json();$('#saved').replaceChildren();for(const p of saved){const b=document.createElement('button');b.textContent=p.client;b.title=p.updated;b.onclick=async()=>{if(!canReplace())return;try{await loadProposal(p.id);message('Draft loaded.');}catch(e){message(e.message,true);}};$('#saved').append(b);}}
+function canReplace(){return !writing&&(!$('#draftState').textContent.includes('unsaved changes')||confirm('Discard unsaved changes?'));}
+$('#new').onclick=()=>{if(!canReplace())return;currentId=null;currentVersion=null;fill({proposal_date:today()});refreshHistory();$('#draftState').textContent='New proposal · not saved';message('');};
+$('#example').onclick=async()=>{if(!canReplace())return;try{fill(await(await api('/api/example')).json());currentId=null;currentVersion=null;refreshHistory();dirty();message('Reference example loaded. Review the open questions before sending.');}catch(e){message(e.message,true);}};
 $('#loadScope').onclick=async()=>{if($('#services').children.length&&!confirm('Replace the current scope with the reference scope?'))return;try{$('#services').replaceChildren();(await(await api('/api/services')).json()).forEach(s=>addRow('services',s));dirty();scheduleQuote();}catch(e){message(e.message,true);}};
-$('#save').onclick=async()=>{if(!form.reportValidity())return;try{const r=await(await api(currentId?'/api/proposals/'+currentId:'/api/proposals',currentId?'PUT':'POST',collect())).json();currentId=r.id;$('#draftState').textContent='All changes saved';message('Draft saved.');await refreshList();}catch(e){message(e.message,true);}};
-$('#generate').onclick=async()=>{if(!form.reportValidity())return;const button=$('#generate');button.disabled=true;$('#exportState').textContent='Building your PowerPoint and services agreement…';try{const r=await api('/api/generate','POST',collect()),blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='TeamLogic-Proposal.zip';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000);$('#exportState').textContent='Download ready. Includes PPTX, PDF, proposal data and a review manifest.';}catch(e){$('#exportState').textContent=e.message;}finally{button.disabled=false;}};
+async function loadProposal(id){
+ const r=await api('/api/proposals/'+id);fill(await r.json());currentId=id;currentVersion=Number(r.headers.get('ETag'));
+ $('#draftState').textContent='All changes saved · revision '+currentVersion;await refreshHistory();
+}
+$('#save').onclick=async()=>{if(writing||!form.reportValidity())return;writing=true;$('#save').disabled=true;try{
+ const r=await(await api(currentId?'/api/proposals/'+currentId:'/api/proposals',currentId?'PUT':'POST',collect(),currentVersion)).json();
+ currentId=r.id;currentVersion=r.version;$('#draftState').textContent='All changes saved · revision '+r.version;message('Revision saved.');await refreshList();await refreshHistory();
+ }catch(e){message(e.message,true);}finally{writing=false;$('#save').disabled=false;}};
+function downloadBlob(blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='TeamLogic-Proposal.zip';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000);}
+$('#generate').onclick=async()=>{if(writing||!form.reportValidity())return;writing=true;const button=$('#generate');button.disabled=true;$('#exportState').textContent='Building and saving your documents…';try{
+ const r=await api('/api/generate'+(currentId?'?proposal_id='+encodeURIComponent(currentId):''),'POST',collect(),currentVersion);
+ currentId=r.headers.get('X-Proposal-Id');currentVersion=Number(r.headers.get('X-Proposal-Version'));downloadBlob(await r.blob());
+ $('#draftState').textContent='All changes saved · revision '+currentVersion;await refreshList();await refreshHistory();
+ $('#exportState').textContent='Download ready. This exact export is saved in version history.';
+ }catch(e){$('#exportState').textContent=e.message;}finally{writing=false;button.disabled=false;}};
 window.addEventListener('beforeunload',e=>{if($('#draftState').textContent.includes('unsaved changes')){e.preventDefault();e.returnValue='';}});
 fill({proposal_date:today()});api('/api/me').then(r=>r.json()).then(u=>showStudio(u.username)).catch(()=>showLogin());

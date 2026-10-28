@@ -8,13 +8,15 @@ from xml.sax.saxutils import escape
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
 TEMPLATES = Path(__file__).resolve().parents[1]/'templates'
-VERSION = '2026.10-v1'
+VERSION = '2026.10-v2'
 
 def money(x): return f'${x:,.2f}'
 
@@ -44,15 +46,20 @@ def pptx_bytes(p, q):
         box.text_frame.margin_left=box.text_frame.margin_right=0
         box.text_frame.text=text
         for para in box.text_frame.paragraphs:
-            para.font.name='Aptos';para.font.size=Pt(size);para.font.bold=bold;para.font.color.rgb=RGBColor.from_string(color)
+            para.font.name='Arial';para.font.size=Pt(size);para.font.bold=bold;para.font.color.rgb=RGBColor.from_string(color)
         return box
     def slide(title):
         s=prs.slides.add_slide(prs.slide_layouts[0])
         for sh in list(s.shapes):
             s.shapes._spTree.remove(sh._element)
         s.background.fill.solid();s.background.fill.fore_color.rgb=RGBColor.from_string('F7F9FB')
-        textbox(s,'TEAMLOGIC IT  /  SCOTTSDALE',.5,.25,9,.35,10,'008D69',True)
-        textbox(s,title,.5,.7,9,.65,26,bold=True)
+        bar=s.shapes.add_shape(MSO_SHAPE.RECTANGLE,0,0,prs.slide_width,Inches(.7))
+        bar.fill.solid();bar.fill.fore_color.rgb=RGBColor.from_string('FFFFFF');bar.line.fill.background()
+        s.shapes.add_picture(str(TEMPLATES/'header-logo.png'),Inches(.5),Inches(.12),height=Inches(.46))
+        header=textbox(s,'SCOTTSDALE',7,.2,2.5,.3,10,'0C5845',True)
+        header.text_frame.paragraphs[0].alignment=PP_ALIGN.RIGHT
+        title_box=textbox(s,title,.5,.85,9,.65,26,bold=True)
+        title_box.text_frame.paragraphs[0].alignment=PP_ALIGN.CENTER
         textbox(s,p.client,.5,5.12,8,.25,10,'59667A')
         # Move before closing.
         ids=prs.slides._sldIdLst; item=ids[-1];ids.remove(item);ids.insert(len(ids)-1,item)
@@ -68,6 +75,7 @@ def pptx_bytes(p, q):
             box=textbox(s,'\n'.join(lines[offset:offset+14]),.5,1.55,9,3.4,15)
             for para in box.text_frame.paragraphs:
                 para.line_spacing=Pt(17)
+                para.alignment=PP_ALIGN.CENTER
     paragraphs('Your environment', [('Users',str(p.users)),('Workstations',str(p.workstations)),('Servers',str(p.servers)),('Cloud',p.cloud),('Identity / domain',p.domain),('Backups',p.backups),('Security',p.security),('Applications',p.applications)])
     paragraphs('Priorities and proposed approach',[('Business needs',p.needs),('Recommendations',p.recommendations),('Excluded',p.exclusions)])
     rows = [[x['description'],str(x['quantity']),money(x['rate']),money(x['total'])+('/mo' if x['cadence']=='monthly' else ' once')] for x in q['lines']]
@@ -92,7 +100,7 @@ def pptx_bytes(p, q):
                 cell=table.cell(ri,ci);cell.text=value
                 cell.fill.solid();cell.fill.fore_color.rgb=RGBColor.from_string('0C5845' if ri==0 else ('E9F2EF' if ri%2 else 'FFFFFF'))
                 for para in cell.text_frame.paragraphs:
-                    para.font.name='Aptos';para.font.size=Pt(11);para.font.color.rgb=RGBColor.from_string('FFFFFF' if ri==0 else '182338')
+                    para.font.name='Arial';para.font.size=Pt(11);para.font.color.rgb=RGBColor.from_string('FFFFFF' if ri==0 else '182338')
         textbox(s,f"Monthly discount: {money(q['discount'])}  |  Monthly tax: {money(q['tax'])}\nOne-time total: {money(q['one_time'])}  |  First month + setup: {money(q['first_month'])}",.5,4.48,9,.55,12)
     paragraphs('Service rates and terms', [('Business hours','Mon-Fri, 8:00 AM-5:00 PM MST, excluding holidays'),('Onsite / special projects',money(p.hourly_rate)+' per hour'),('After hours / weekends',money(p.after_hours_rate)+' per hour'),('Initial term',f'{p.term_months} months'),('Renewal term',f'{p.renewal_months} months'),('Nonrenewal notice',f'{p.notice_days} days'),('Tax',f'{p.tax_percent}% on taxable items; discount allocated proportionally')])
     prs.core_properties.title=f'Managed IT services proposal - {p.client}'

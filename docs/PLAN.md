@@ -30,9 +30,9 @@ The original reference files remain unchanged. `templates/proposal.pptx` retains
 1. Tal reviews contract/template fidelity, scope wording and tax classification with the business's tax adviser.
 2. Add a service catalog for Datto Endpoint Backup, AppRiver cloud-to-cloud backup, Sophos Endpoint Protection, Sophos email filtering and Sophos MDR. Define billing units, costs/margins, license minimums, included features, term restrictions and tax classification before setting defaults.
 3. Deploy to the dedicated Debian 13 VM on Acadia, create the two local accounts, configure intranet HTTPS/DNS and backups, test restore.
-4. Add revision history and conflict detection if both users edit the same draft concurrently; current drafts use last-save-wins semantics.
+4. Revision history, exact export retention, compression, deletion and conflict detection are implemented in v0.1.0; see HISTORY.md.
 5. Add template approval/version management, per-line jurisdiction/rates if needed, PDF preview and optional e-signature integration.
 
 ## Explicit boundaries
 
-The current framework uses one tax rate per proposal applied only to flagged lines, with proportional allocation of the monthly discount. It does not automatically determine taxability or jurisdiction. There is no vendor catalog, payment processing, e-signature, password recovery email, audit history or automatic export archive. Exports are generated synchronously and held in memory; appropriate for two users, not bulk jobs. Backups must include the SQLite volume and templates. Signed documents remain external records.
+The current framework uses one tax rate per proposal applied only to flagged lines, with proportional allocation of the monthly discount. It does not automatically determine taxability or jurisdiction. There is no vendor catalog, payment processing, e-signature, or password recovery email. Revision author/timestamps and exact exports are retained in SQLite. Exports are generated synchronously and held in memory; appropriate for two users, not bulk jobs. Backups must include the SQLite volume and templates. Signed documents remain external records.

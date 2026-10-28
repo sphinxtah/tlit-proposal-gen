@@ -25,6 +25,22 @@ function python(code){const r=spawnSync('docker',['compose','-p','tlit-proposal-
  await page.locator('#draftState').filter({hasText:'All changes saved'}).waitFor();
  const downloadPromise=page.waitForEvent('download');await page.locator('#generate').click();
  const download=await downloadPromise;await download.saveAs('tmp/browser-export.zip');
+ await page.waitForFunction(()=>document.querySelectorAll('.history-row').length===2);
+ await page.locator('.history-row').last().getByText('View snapshot',{exact:true}).click();
+ await page.locator('#historyDialog').waitFor({state:'visible'});
+ if(!(await page.locator('#historyDetail').textContent()).includes('QA browser smoke'))throw Error('History snapshot missing');
+ await page.locator('#closeHistory').click();
+ page.once('dialog',d=>d.accept());
+ await page.locator('.history-row').last().getByText('Restore as new revision',{exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('.history-row').length===3);
+ const originalDownload=page.waitForEvent('download');
+ await page.getByText('Download saved export',{exact:true}).click();
+ const original=await originalDownload;await original.saveAs('tmp/history-export.zip');
+ if(!fs.readFileSync('tmp/browser-export.zip').equals(fs.readFileSync('tmp/history-export.zip')))throw Error('Historical export differs');
+ page.once('dialog',d=>d.accept('DELETE'));
+ await page.locator('.history-row').last().getByText('Delete revision',{exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('.history-row').length===2);
+ await page.locator('#history').scrollIntoViewIfNeeded();await page.screenshot({path:'tmp/ui-history.png'});
  await page.locator('#client').scrollIntoViewIfNeeded();
  await page.screenshot({path:'tmp/ui-desktop.png'});
  await page.locator('[name=billing_mode]').selectOption('users');
@@ -37,7 +53,7 @@ function python(code){const r=spawnSync('docker',['compose','-p','tlit-proposal-
  const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
  if(overflow)throw Error('Mobile horizontal overflow');
  if(errors.length)throw Error(errors.join('\n'));
- console.log('Browser passed: login, example, save, export, billing modes, mobile layout; no JavaScript errors.');
+ console.log('Browser passed: login, save, export, history view/restore/delete, exact historical export, billing modes, mobile layout; no JavaScript errors.');
  }finally{
  if(browser)await browser.close();
  python(`from app.main import connect\nwith connect() as db:\n db.execute('DELETE FROM users WHERE username=?',(${JSON.stringify(username)},))\n db.execute('DELETE FROM sessions WHERE username=?',(${JSON.stringify(username)},))\n db.execute('DELETE FROM proposals WHERE id=?',(${JSON.stringify(savedId||'')},))`);

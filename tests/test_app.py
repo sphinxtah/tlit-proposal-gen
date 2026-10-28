@@ -51,7 +51,7 @@ def test_auth_save_reload_and_download():
         result=c.post('/api/proposals',json=data);assert result.status_code==200
         assert c.get('/api/proposals/'+result.json()['id']).json()==data
         data['client']='Different Client & Co'
-        assert c.put('/api/proposals/'+result.json()['id'],json=data).status_code==200
+        assert c.put('/api/proposals/'+result.json()['id'],json=data,headers={'If-Match':'1'}).status_code==200
         response=c.post('/api/generate',json=data);assert response.status_code==200
         z=zipfile.ZipFile(io.BytesIO(response.content))
         pdf=PdfReader(io.BytesIO(z.read('Managed-IT-Services.pdf')))
