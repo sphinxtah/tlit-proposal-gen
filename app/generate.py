@@ -1,166 +1,278 @@
-"""Render both outputs from the same validated proposal and Decimal quote."""
+"""Render both outputs from the same validated proposal and Decimal quote.
+
+Both documents are the supplied, completed reference proposal with client values swapped in.
+Design and formatting come entirely from templates/proposal.pptx and templates/agreement.docx
+(see scripts/prepare_templates.py); nothing here adds slides, pages or styling.
+"""
+import copy
 import io
-import json
-import textwrap
-import math
+from collections import OrderedDict
+from decimal import Decimal
 from pathlib import Path
-from xml.sax.saxutils import escape
+
+from docx import Document
+from docx.table import _Row
 from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
-from pptx.enum.shapes import MSO_SHAPE
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from pptx.util import Pt
 
-TEMPLATES = Path(__file__).resolve().parents[1]/'templates'
-VERSION = '2026.10-v2'
+from app.textfill import fill_lines, paragraphs, replace, text
 
-def money(x): return f'${x:,.2f}'
+TEMPLATES = Path(__file__).resolve().parents[1] / 'templates'
+VERSION = '2026.10-v3'
+STATUS = {'Included': 'YES', 'Excluded': 'NO', 'Not applicable': 'NA'}
+# Shape ids on the pricing slide (slide 12) of the reference deck, for cards with nothing to show.
+SECURITY_CARD = [5]
+BACKUP_CARD = [9, 10, 15, 16, 17, 19, 6, 13, 31, 36]
+PRICING_SLIDE, CURRENT_STATE_SLIDE = 11, 10
 
-def shapes(items):
-    for shape in items:
+
+def money(x):
+    return f'${x:,.2f}'
+
+
+def money_short(x):
+    """$500 for whole amounts, $500.50 otherwise (as written in the reference proposal)."""
+    return f'${x:,.0f}' if x == x.to_integral_value() else money(x)
+
+
+def us_date(d):
+    return d.strftime('%m/%d/%Y') if d else '__________'
+
+
+ONES = 'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split()
+TENS = 'twenty thirty forty fifty sixty seventy eighty ninety'.split()
+
+
+def number_words(n):
+    if n < 20:
+        return ONES[n]
+    if n < 100:
+        return TENS[n // 10 - 2] + ('-' + ONES[n % 10] if n % 10 else '')
+    return ONES[n // 100] + ' hundred' + (' ' + number_words(n % 100) if n % 100 else '')
+
+
+def term(months):
+    n, unit = (months // 12, 'year') if months % 12 == 0 else (months, 'month')
+    return f'{number_words(n)} ({n}) {unit}{"" if n == 1 else "s"}'
+
+
+def monthly_lines(q, category):
+    return [x for x in q['lines'] if x['category'] == category and x['cadence'] == 'monthly']
+
+
+def detail(lines, separator=' '):
+    """'2 users × $25.00', grouping lines with the same unit and rate."""
+    groups = OrderedDict()
+    for x in lines:
+        key = (x['unit'], Decimal(x['rate']))
+        groups[key] = groups.get(key, 0) + x['quantity']
+    return [f'{qty}{separator}{unit} × {money(rate)}' for (unit, rate), qty in groups.items()]
+
+
+def total(lines):
+    return sum((x['total'] for x in lines), Decimal('0'))
+
+
+def device_count(p):
+    return p.workstations + p.servers
+
+
+def pricing_basis(p):
+    return {'devices': f'{device_count(p)} Devices', 'users': f'{p.users} Users'}.get(
+        p.billing_mode, f'{p.users} Users / {device_count(p)} Devices')
+
+
+def fee_basis(p):
+    return {'devices': f'Workstation/Server - {device_count(p):02d}', 'users': f'Users - {p.users:02d}'}.get(
+        p.billing_mode, f'Users - {p.users:02d}, Workstation/Server - {device_count(p):02d}')
+
+
+def fee_components(q):
+    parts = ['Managed Services']
+    if monthly_lines(q, 'security'):
+        parts.append('Cybersecurity')
+    if monthly_lines(q, 'backup'):
+        parts.append('Backup')
+    parts += [x['description'] for x in monthly_lines(q, 'other')]
+    return ', '.join(parts)
+
+
+def current_state(p):
+    lines = [line.strip() for line in p.current_state.splitlines() if line.strip()]
+    if lines:
+        return lines
+    derived = [f'{p.workstations} desktops/laptops'] if p.workstations else []
+    if p.servers:
+        derived.append(f'{p.servers} server{"s" if p.servers != 1 else ""}')
+    return derived or ['']
+
+
+def fill_tokens(root, values, multiline=None):
+    multiline = multiline or {}
+    for p in paragraphs(root):
+        content = text(p)
+        if '{{' not in content:
+            continue
+        for token, lines in multiline.items():
+            if token in content:
+                fill_lines(p, token, lines)
+        for token, value in values.items():
+            if token in content:
+                replace(p, token, value)
+
+
+def all_shapes(shapes):
+    for shape in shapes:
         yield shape
         if shape.shape_type == 6:
-            yield from shapes(shape.shapes)
+            yield from all_shapes(shape.shapes)
+
+
+HEADING_FIT = len('PROPOSAL PRICING – 4 Devices')  # The longest heading that clears the setup card at 12 pt.
+
+
+def fit_heading(shape):
+    """Shrink the pricing heading (font and letter spacing) only when it is longer than the reference one."""
+    content = shape.text_frame.text
+    if not content.startswith('PROPOSAL PRICING') or len(content) <= HEADING_FIT:
+        return
+    scale = max(HEADING_FIT / len(content), 0.55)
+    for para in shape.text_frame.paragraphs:
+        for run in para.runs:
+            if run.font.size:
+                run.font.size = int(run.font.size * scale)
+            spacing = run.font._rPr.get('spc')
+            if spacing:
+                run.font._rPr.set('spc', str(int(int(spacing) * scale)))
+
 
 def pptx_bytes(p, q):
-    prs = Presentation(TEMPLATES/'proposal.pptx')
-    for slide in prs.slides:
-        for sh in shapes(slide.shapes):
-            if sh.has_text_frame:
-                for para in sh.text_frame.paragraphs:
-                    for run in para.runs:
-                        run.text=run.text.replace('{{client}}',p.client).replace('{{proposal_month}}',p.proposal_date.strftime('%B %Y'))
+    prs = Presentation(TEMPLATES / 'proposal.pptx')
+    security, backup, core = monthly_lines(q, 'security'), monthly_lines(q, 'backup'), monthly_lines(q, 'core')
+    values = {
+        '{{client}}': p.client, '{{proposal_month}}': p.proposal_date.strftime('%B %Y'),
+        '{{pricing_basis}}': pricing_basis(p), '{{monthly}}': money(q['net']),
+        '{{core_monthly}}': money(total(core)), '{{core_total}}': money(total(core)),
+        '{{onboarding}}': money_short(p.onboarding),
+        '{{security_monthly}}': money(total(security)), '{{security_total}}': money(total(security)),
+        '{{backup_label}}': p.backup_label, '{{backup_monthly}}': money(total(backup)), '{{backup_total}}': money(total(backup)),
+        '{{hourly_rate}}': money_short(p.hourly_rate), '{{after_hours_rate}}': money_short(p.after_hours_rate),
+    }
+    multiline = {'{{current_state}}': current_state(p), '{{core_detail}}': detail(core, '  ') or [''],
+                 '{{security_detail}}': detail(security) or [''], '{{backup_detail}}': detail(backup) or ['']}
+    for index, slide in enumerate(prs.slides):
+        if index == PRICING_SLIDE:
+            hidden = (SECURITY_CARD if not security else []) + (BACKUP_CARD if not backup else [])
+            for shape in list(all_shapes(slide.shapes)):
+                if shape.shape_id in hidden:
+                    shape._element.getparent().remove(shape._element)
+        for shape in all_shapes(slide.shapes):
+            if shape.has_text_frame:
+                fill_tokens(shape._element, values, multiline)
+                if index == PRICING_SLIDE:
+                    fit_heading(shape)
                 # Long company names wrap inside the original cover text box.
-                if p.client in sh.text and len(p.client)>30:
-                    sh.text_frame.word_wrap=True
-                    for para in sh.text_frame.paragraphs:
-                        for run in para.runs: run.font.size=Pt(20)
-    # New client-specific slides are inserted before the original closing slide.
-    def textbox(slide, text, x,y,w,h, size=17, color='182338', bold=False):
-        box=slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
-        box.text_frame.word_wrap=True
-        box.text_frame.margin_left=box.text_frame.margin_right=0
-        box.text_frame.text=text
-        for para in box.text_frame.paragraphs:
-            para.font.name='Arial';para.font.size=Pt(size);para.font.bold=bold;para.font.color.rgb=RGBColor.from_string(color)
-        return box
-    def slide(title):
-        s=prs.slides.add_slide(prs.slide_layouts[0])
-        for sh in list(s.shapes):
-            s.shapes._spTree.remove(sh._element)
-        s.background.fill.solid();s.background.fill.fore_color.rgb=RGBColor.from_string('F7F9FB')
-        bar=s.shapes.add_shape(MSO_SHAPE.RECTANGLE,0,0,prs.slide_width,Inches(.7))
-        bar.fill.solid();bar.fill.fore_color.rgb=RGBColor.from_string('FFFFFF');bar.line.fill.background()
-        s.shapes.add_picture(str(TEMPLATES/'header-logo.png'),Inches(.5),Inches(.12),height=Inches(.46))
-        header=textbox(s,'SCOTTSDALE',7,.2,2.5,.3,10,'0C5845',True)
-        header.text_frame.paragraphs[0].alignment=PP_ALIGN.RIGHT
-        title_box=textbox(s,title,.5,.85,9,.65,26,bold=True)
-        title_box.text_frame.paragraphs[0].alignment=PP_ALIGN.CENTER
-        textbox(s,p.client,.5,5.12,8,.25,10,'59667A')
-        # Move before closing.
-        ids=prs.slides._sldIdLst; item=ids[-1];ids.remove(item);ids.insert(len(ids)-1,item)
-        return s
-    def paragraphs(title, entries):
-        lines=[]
-        for label,value in entries:
-            if value:
-                lines.extend(textwrap.wrap(f'{label}: {value}',width=82,replace_whitespace=True))
-                lines.append('')
-        for offset in range(0,max(1,len(lines)),14):
-            s=slide(title if offset==0 else title+' (continued)')
-            box=textbox(s,'\n'.join(lines[offset:offset+14]),.5,1.55,9,3.4,15)
-            for para in box.text_frame.paragraphs:
-                para.line_spacing=Pt(17)
-                para.alignment=PP_ALIGN.CENTER
-    paragraphs('Your environment', [('Users',str(p.users)),('Workstations',str(p.workstations)),('Servers',str(p.servers)),('Cloud',p.cloud),('Identity / domain',p.domain),('Backups',p.backups),('Security',p.security),('Applications',p.applications)])
-    paragraphs('Priorities and proposed approach',[('Business needs',p.needs),('Recommendations',p.recommendations),('Excluded',p.exclusions)])
-    rows = [[x['description'],str(x['quantity']),money(x['rate']),money(x['total'])+('/mo' if x['cadence']=='monthly' else ' once')] for x in q['lines']]
-    batches=[];batch=[];height=.36
-    for row in rows:
-        row_height=max(.36,.19*max(1,len(textwrap.wrap(row[0],width=52)))+.14)
-        if batch and height+row_height>2.2:
-            batches.append(batch);batch=[];height=.36
-        batch.append((row,row_height));height+=row_height
-    if batch or not batches:batches.append(batch)
-    for batch_index,batch in enumerate(batches):
-        s=slide('Your investment' if batch_index==0 else 'Your investment (continued)')
-        textbox(s,f"{money(q['monthly'])} / month",.5,1.45,9,.5,25,'008D69',True)
-        subset=[row for row,h in batch]
-        heights=[.36]+[h for row,h in batch]
-        table=s.shapes.add_table(len(subset)+1,4, Inches(.5), Inches(2.1), Inches(9), Inches(sum(heights))).table
-        for tr,h in zip(table.rows,heights):tr.height=Inches(h)
-        widths=[4.7,.6,1.5,2.2]
-        for c,w in zip(table.columns,widths):c.width=Inches(w)
-        for ri,row in enumerate([['Service','Qty','Unit rate','Amount']]+subset):
-            for ci,value in enumerate(row):
-                cell=table.cell(ri,ci);cell.text=value
-                cell.fill.solid();cell.fill.fore_color.rgb=RGBColor.from_string('0C5845' if ri==0 else ('E9F2EF' if ri%2 else 'FFFFFF'))
-                for para in cell.text_frame.paragraphs:
-                    para.font.name='Arial';para.font.size=Pt(11);para.font.color.rgb=RGBColor.from_string('FFFFFF' if ri==0 else '182338')
-        textbox(s,f"Monthly discount: {money(q['discount'])}  |  Monthly tax: {money(q['tax'])}\nOne-time total: {money(q['one_time'])}  |  First month + setup: {money(q['first_month'])}",.5,4.48,9,.55,12)
-    paragraphs('Service rates and terms', [('Business hours','Mon-Fri, 8:00 AM-5:00 PM MST, excluding holidays'),('Onsite / special projects',money(p.hourly_rate)+' per hour'),('After hours / weekends',money(p.after_hours_rate)+' per hour'),('Initial term',f'{p.term_months} months'),('Renewal term',f'{p.renewal_months} months'),('Nonrenewal notice',f'{p.notice_days} days'),('Tax',f'{p.tax_percent}% on taxable items; discount allocated proportionally')])
-    prs.core_properties.title=f'Managed IT services proposal - {p.client}'
-    stream=io.BytesIO();prs.save(stream);return stream.getvalue()
+                if index == 0 and p.client in shape.text_frame.text and len(p.client) > 30:
+                    shape.text_frame.word_wrap = True
+                    for para in shape.text_frame.paragraphs:
+                        for run in para.runs:
+                            if p.client in run.text:
+                                run.font.size = Pt(20)
+    prs.core_properties.title = f'Managed IT services proposal - {p.client}'
+    stream = io.BytesIO()
+    prs.save(stream)
+    return stream.getvalue()
 
-def pdf_bytes(p,q):
-    stream=io.BytesIO()
-    styles=getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='BodyTL',fontName='Helvetica',fontSize=9.5,leading=14,spaceAfter=8,textColor=colors.HexColor('#243247')))
-    styles.add(ParagraphStyle(name='HeadTL',fontName='Helvetica-Bold',fontSize=18,leading=23,spaceBefore=13,spaceAfter=14,textColor=colors.HexColor('#0C5845'),keepWithNext=True))
-    styles.add(ParagraphStyle(name='CellTL',parent=styles['BodyTL'],fontSize=8.5,leading=12,spaceAfter=0))
-    def para(text,style='BodyTL'):return Paragraph(escape(str(text)).replace('\n','<br/>'),styles[style])
-    story=[]
-    def heading(text):story.append(para(text,'HeadTL'))
-    def table(rows,widths=None):
-        t=Table([[para(v,'CellTL') for v in row] for row in rows],colWidths=widths,repeatRows=1,hAlign='LEFT')
-        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#DCEEE7')),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F4F7F8')]),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),9),('RIGHTPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6)]))
-        story.extend([t,Spacer(1,12)])
-    story.extend([para('TEAMLOGIC IT  /  SCOTTSDALE','HeadTL'),Spacer(1,20),para('Managed IT Services','Title'),Spacer(1,12),para(f'Statement of Work for {p.client}','HeadTL'),para(p.address),para(f'Prepared {p.proposal_date.isoformat()} by {p.prepared_by or "TeamLogic IT Scottsdale"}')])
-    table([['Monthly investment','One-time charges','Initial term'],[money(q['monthly']),money(q['one_time']),f'{p.term_months} months']],[170,170,170])
-    table([['Agreement detail','Value'],['Customer / authorized personnel',f'{p.client}\n{p.contact}\n{p.email}\n{p.phone}'],['MSP','SMTA Holdings Inc doing business as TeamLogic IT of Scottsdale\n8687 E Via De Ventura Suite 301 Scottsdale AZ 85258'],['MSP authorized personnel',p.prepared_by],['MSA date',p.msa_date or 'To be confirmed'],['SOW effective date',p.effective_date or 'To be confirmed'],['Term',f'Initial: {p.term_months} months; renewal: {p.renewal_months} months; nonrenewal notice: {p.notice_days} days'],['Governing state / venue','Arizona / Maricopa'],['Business hours','Mon-Fri 8:00 AM-5:00 PM MST, excluding holidays'],['Policies','NA']],[160,350])
-    story.append(para('This SOW is entered into between the MSP and Customer. The Parties acknowledge and agree that they have read and understand Master Services Agreement (MSA) General Terms and Conditions. The Parties acknowledge and agree that they have read and understand this SOW and agree to be bound to its terms.'))
-    story.append(PageBreak());heading('Schedule A  /  Additional terms')
-    for text in json.loads((TEMPLATES/'terms.json').read_text(encoding='utf-8')):
-        # The cover's explicit notice period drives the matching contractual reference.
-        story.append(para(text,'HeadTL' if text.strip() in ['Recitals','Term and Termination.','Fees and Payment Schedule.','Scope; Services; Minimum Requirements.','Coverage.','Additional Maintenance Services.'] else 'BodyTL'))
-    story.append(PageBreak());heading('Schedule B  /  Services')
-    story.append(para('Only services marked Included below are included within this engagement.'))
-    table([['Service','Frequency','Coverage']]+[[s.description,s.frequency,s.status] for s in p.services],[300,100,110])
-    heading('Exclusions and scope notes');story.append(para(p.exclusions or 'No additional exclusions specified.'))
-    heading('Environment and discovery')
-    for label,value in [('Cloud',p.cloud),('Identity / domain',p.domain),('Backups',p.backups),('Security',p.security),('Applications',p.applications),('Needs',p.needs),('Recommendations',p.recommendations)]:
-        if value:story.append(para(f'{label}: {value}'))
-    if p.assets:
-        heading('Equipment inventory')
-        table([['Type','Description / location','Qty']]+[[a.kind,a.description+('\n'+a.location if a.location else ''),a.quantity] for a in p.assets],[110,350,50])
-    story.append(PageBreak());heading('Schedule C  /  Service rates')
-    table([['Service','Qty','Unit rate','Amount']]+[[x['description']+(' (monthly)' if x['cadence']=='monthly' else ' (one-time)'),x['quantity'],money(x['rate']),money(x['total'])] for x in q['lines']],[265,40,95,110])
-    table([['Summary','Amount'],['Recurring subtotal',money(q['subtotal'])],['Monthly discount','-'+money(q['discount'])],[f'Monthly tax ({p.tax_percent}%)',money(q['tax'])],['Monthly total',money(q['monthly'])],['One-time total including tax',money(q['one_time'])],['First month plus one-time charges',money(q['first_month'])],[f'Initial {p.term_months}-month total including one-time charges',money(q['term_total'])]],[340,170])
-    story.append(para(f'Tax is calculated at {p.tax_percent}% on items designated taxable. The monthly discount is allocated proportionally across recurring items. Term totals assume unchanged quantities and rates.'))
-    table([['Additional service','Rate'],['Onsite labor / special projects',money(p.hourly_rate)+'/hour'],['After-hours / weekend / holiday support',money(p.after_hours_rate)+'/hour']],[340,170])
-    story.append(para('We reserve the right to adjust the monthly ongoing fee for managed services when additional equipment is added, or new users/supported employees are brought on board. The adjusted fee will be reflected in the monthly invoice.'))
-    heading('Covered users and equipment')
-    story.append(para(f'{p.users} users; {p.workstations} workstations; {p.servers} servers. Network equipment is listed in the inventory and covered only as specified in Schedule B.'))
-    story.append(PageBreak());heading('Acceptance')
-    story.append(para('The parties agree to this SOW Cover Page and Schedules A, B and C, subject to the Master Services Agreement.'))
-    table([['TeamLogic IT of Scottsdale',p.client],['Signature: _________________________\n\nName: ____________________________\n\nTitle: _____________________________\n\nDate: ____________________________','Signature: _________________________\n\nName: ____________________________\n\nTitle: _____________________________\n\nDate: ____________________________']],[255,255])
-    story.append(PageBreak());heading('Recurring Payment Authorization Form')
-    payment=json.loads((TEMPLATES/'payment.json').read_text(encoding='utf-8'))
-    for text in payment[1:5]:story.append(para(text))
-    story.append(para('Company name: ______________________________________________'))
-    story.append(para('Authorizes TeamLogic IT to charge the account indicated below on the 7st day of each month for payment of the firm\'s Managed Services.'))
-    story.append(para('Billing address: _________________________________________________\nCity, State, ZIP: _________________________________________________\nPhone: ___________________  Email: ______________________________'))
-    table([['Checking / Savings Account','Credit Card (3% fee)'],['Account type: Checking ___ Savings ___\n\nName on account: __________________\n\nBank name: _______________________\n\nAccount number: __________________\n\nBank routing number: _______________\n\nBank city / state: ___________________','Visa ___ MasterCard ___ Amex ___ Discover ___\n\nCardholder name: __________________\n\nAccount number: __________________\n\nExpiration date: ___________________']],[255,255])
-    story.append(para('Signature: __________________________________  Date: ______________'))
-    for text in payment:
-        if text.startswith('I understand'):story.append(para(text))
-    def footer(canvas,doc):
-        canvas.setFont('Helvetica',8);canvas.setFillColor(colors.HexColor('#627083'))
-        canvas.drawString(51,28,'TeamLogic IT Scottsdale | Managed IT Services')
-        canvas.drawRightString(561,28,str(doc.page))
-    SimpleDocTemplate(stream,pagesize=(612,792),leftMargin=51,rightMargin=51,topMargin=45,bottomMargin=49,title=f'Managed IT Services - {p.client}',author='TeamLogic IT Scottsdale').build(story,onFirstPage=footer,onLaterPages=footer)
+
+def _cells(row):
+    seen, out = set(), []
+    for cell in row.cells:
+        if id(cell._tc) not in seen:
+            seen.add(id(cell._tc))
+            out.append(cell)
+    return out
+
+
+def _set_cell(cell, value):
+    first = cell.paragraphs[0]
+    replace(first._p, text(first._p), value)
+
+
+def schedule_b(doc, services):
+    """Set coverage on the reference Schedule B rows; drop rows not in scope; append custom services."""
+    wanted = OrderedDict((s.description.strip(), s) for s in services)
+    seen, last_table = set(), doc.tables[3]
+    # Added services copy a single-line service row from the table they are appended to (same column grid).
+    prototype = [copy.deepcopy(r._tr) for i, r in enumerate(last_table.rows) if _row_kind(r, i, 1) == 'item'
+                 and all(len(c.paragraphs) == 1 for c in _cells(r))][-1]
+    for table in doc.tables[2:4]:
+        for row in list(table.rows):
+            cells = _cells(row)
+            if cells[-1].text.strip() not in STATUS.values():
+                continue
+            description = cells[0].text.strip()
+            service = wanted.get(description)
+            if service is None or description in seen:
+                row._tr.getparent().remove(row._tr)
+                continue
+            seen.add(description)
+            if cells[1].text.strip() != service.frequency:
+                _set_cell(cells[1], service.frequency)
+            _set_cell(cells[-1], STATUS[service.status])
+    extra = [s for d, s in wanted.items() if d not in seen]
+    rows = last_table._tbl.tr_lst
+    anchor = rows[-2] if len(rows) > 1 and not ''.join(c.text for c in _cells(last_table.rows[-1])).strip() else rows[-1]
+    if extra:
+        heading = [r for i, r in enumerate(last_table.rows) if _row_kind(r, i, 1) == 'heading'][-1]
+        clone = copy.deepcopy(heading._tr)
+        anchor.addnext(clone)
+        anchor = clone
+        _set_cell(_cells(_Row(clone, last_table))[0], 'Additional Services')
+    for service in extra:
+        clone = copy.deepcopy(prototype)
+        anchor.addnext(clone)
+        anchor = clone
+        cells = _cells(_Row(clone, last_table))
+        _set_cell(cells[0], service.description)
+        _set_cell(cells[1], service.frequency)
+        _set_cell(cells[-1], STATUS[service.status])
+    # Category headings ("Servers", "Disaster Recovery") whose services were all removed are dropped too.
+    for table, first in ((doc.tables[2], 2), (doc.tables[3], 1)):
+        rows = list(table.rows)
+        kinds = [_row_kind(r, i, first) for i, r in enumerate(rows)]
+        for i, kind in enumerate(kinds):
+            following = [k for k in kinds[i + 1:] if k != 'blank']
+            if kind == 'heading' and (not following or following[0] != 'item'):
+                rows[i]._tr.getparent().remove(rows[i]._tr)
+
+
+def _row_kind(row, index, first):
+    cells = _cells(row)
+    if index < first:
+        return 'fixed'
+    if cells[-1].text.strip() in STATUS.values():
+        return 'item'
+    return 'heading' if len(cells) == 1 and cells[0].text.strip() else 'blank'
+
+
+def docx_bytes(p, q):
+    doc = Document(TEMPLATES / 'agreement.docx')
+    one_time = sum((x['total'] for x in q['lines'] if x['cadence'] == 'one-time'), Decimal('0'))
+    values = {
+        '{{client}}': p.client, '{{proposal_date}}': us_date(p.proposal_date), '{{contact}}': p.contact,
+        '{{phone}}': p.phone, '{{prepared_by}}': p.prepared_by, '{{msa_date}}': us_date(p.msa_date),
+        '{{effective_date}}': us_date(p.effective_date), '{{initial_term}}': term(p.term_months),
+        '{{renewal_term}}': term(p.renewal_months), '{{notice_days}}': str(p.notice_days),
+        '{{setup_fee}}': money_short(one_time), '{{monthly_fee}}': money(q['net']),
+        '{{fee_basis}}': fee_basis(p), '{{fee_components}}': fee_components(q),
+        '{{hourly_rate}}': money_short(p.hourly_rate), '{{after_hours_rate}}': money_short(p.after_hours_rate),
+        '{{workstations}}': str(p.workstations), '{{networks}}': str(p.networks),
+        '{{servers}}': str(p.servers), '{{mobile_devices}}': str(p.mobile_devices),
+    }
+    address = [line.strip() for line in p.address.splitlines() if line.strip()] or ['']
+    fill_tokens(doc.element.body, values, {'{{address}}': address})
+    schedule_b(doc, p.services)
+    doc.core_properties.title = f'Managed IT Services - {p.client}'
+    stream = io.BytesIO()
+    doc.save(stream)
     return stream.getvalue()

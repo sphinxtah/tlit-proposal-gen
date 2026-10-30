@@ -1,6 +1,6 @@
 # Proposal history and retention
 
-Every **Save draft** and **Generate PPTX + PDF** creates a numbered revision. Snapshots contain the full intake data and the calculated quote at that moment, together with author and timestamp. Export revisions additionally retain the exact ZIP bytes (PPTX, PDF, JSON, and manifest) and application/template versions. Nothing is sent to GitHub or another service to retain history.
+Every **Save draft** and **Generate PPTX + DOCX** creates a numbered revision. Snapshots contain the full intake data and the calculated quote at that moment, together with author and timestamp. Export revisions additionally retain the exact ZIP bytes (PPTX, PDF, JSON, and manifest) and application/template versions. Nothing is sent to GitHub or another service to retain history.
 
 The Version history section lets both authenticated users inspect a snapshot, download a saved export, or restore a previous revision. Restoring appends a new revision; it does not overwrite older history. Unsaved keystrokes are not retained. Saving is explicit and exporting saves automatically.
 

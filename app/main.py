@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 from app.models import Proposal, quote
-from app.generate import pptx_bytes, pdf_bytes, TEMPLATES, VERSION
+from app.generate import pptx_bytes, docx_bytes, TEMPLATES, VERSION
 from app.version import APP_VERSION
 from app.storage import (connect, initialize, append_revision, decode_revision,
                          compress_history, cutoff, cleanup_plan, execute_cleanup, stamp, purge_expired)
@@ -62,6 +62,12 @@ def client_ip(request:Request):
         forwarded=request.headers.get('x-forwarded-for','')
         if forwarded:return forwarded.split(',')[0].strip()
     return request.client.host if request.client else 'unknown'
+
+def document_names(client):
+    """ZIP entry names follow the reference files: ProjectCenter_IT_Proposal.pptx and
+    'TeamLogicIT - Managed IT Services-ProjectCenter.docx'."""
+    name=re.sub(r'[\\/:*?"<>|\x00-\x1f]+','',client).strip(' .')[:80] or 'Client'
+    return f'{name}_IT_Proposal.pptx',f'TeamLogicIT - Managed IT Services-{name}.docx'
 
 def attachment(client,version):
     slug=re.sub(r'[^A-Za-z0-9]+','-',client).strip('-')[:40] or 'Proposal'
@@ -241,7 +247,7 @@ def delete_old(c:CleanupConfirmation,user=Depends(authenticated)):
 @app.post('/api/generate')
 def generate(p:Proposal,response:Response,user=Depends(authenticated),proposal_id:str|None=None,if_match:str|None=Header(default=None)):
     q=pricing(p,user)
-    ppt=pptx_bytes(p,q);pdf=pdf_bytes(p,q)
+    ppt=pptx_bytes(p,q);agreement=docx_bytes(p,q);deck_name,agreement_name=document_names(p.client)
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         if proposal_id:check_version(db,proposal_id,if_match)
@@ -250,7 +256,7 @@ def generate(p:Proposal,response:Response,user=Depends(authenticated),proposal_i
         saved=append_revision(db,proposal_id,p.model_dump(mode='json'),user,'export',quote=q)
         output=io.BytesIO()
         with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as z:
-            z.writestr('Proposal.pptx',ppt);z.writestr('Managed-IT-Services.pdf',pdf)
+            z.writestr(deck_name,ppt);z.writestr(agreement_name,agreement)
             z.writestr('proposal-data.json',p.model_dump_json(indent=2))
             z.writestr('generation-manifest.json',json.dumps({'app_version':APP_VERSION,'template_version':VERSION,'generated_by':user,'generated_at':stamp(),**saved,'warnings':q['warnings'],'monthly':str(q['monthly'])},indent=2))
         raw=output.getvalue()

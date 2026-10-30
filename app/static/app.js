@@ -1,7 +1,7 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)], form=$('#proposalForm');
 let currentId=null, currentVersion=null, timer, quoteSequence=0, writing=false, lastQuote=null;
 const currency=v=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(v);
-const numeric=new Set(['users','workstations','servers','term_months','renewal_months','notice_days']);
+const numeric=new Set(['users','workstations','servers','networks','mobile_devices','term_months','renewal_months','notice_days']);
 const moneyFields=new Set(['user_rate','workstation_rate','server_rate','onboarding','discount','tax_percent','hourly_rate','after_hours_rate']);
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Phoenix',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -35,14 +35,16 @@ for(const [key,label,placeholder] of DISCOVERY){
 }
 
 // ---------- Dynamic rows ----------
+const CARDS=[['security','Cybersecurity'],['backup','Backup'],['other','Other']];
+const guessCard=d=>/backup/i.test(d||'')?'backup':/secur|protect|mdr|soc\b|endpoint/i.test(d||'')?'security':'other';
 function field(label,key,value,type='text',options=null,max=200){
- let control=options?`<select data-key="${key}">${options.map(v=>`<option ${value===v?'selected':''}>${escapeHtml(v)}</option>`).join('')}</select>`:`<input data-key="${key}" type="${type}" ${type==='checkbox'?(value?'checked':''):`value="${escapeHtml(value)}"`} ${type==='number'?'min="0" max="'+(key==='quantity'?'100000':'1000000')+'" step="'+(key==='quantity'?'1':'0.01')+'"':`maxlength="${max}"`}>`;
+ let control=options?`<select data-key="${key}">${options.map(o=>{const [v,t]=Array.isArray(o)?o:[o,o];return `<option value="${escapeHtml(v)}" ${value===v?'selected':''}>${escapeHtml(t)}</option>`;}).join('')}</select>`:`<input data-key="${key}" type="${type}" ${type==='checkbox'?(value?'checked':''):`value="${escapeHtml(value)}"`} ${type==='number'?'min="0" max="'+(key==='quantity'?'100000':'1000000')+'" step="'+(key==='quantity'?'1':'0.01')+'"':`maxlength="${max}"`}>`;
  return `<label>${label}${control}</label>`;
 }
 function addRow(kind,data={}){
  const row=document.createElement('div');row.className='dynamic-row '+(kind==='services'?'service-row':kind==='extras'?'extra-row':'');
  if(kind==='assets')row.innerHTML=field('Type','kind',data.kind||'Workstation','text',['Workstation','Physical server','Cloud server','Firewall','Switch','Access point','Other'])+field('Description','description',data.description||'')+field('Qty','quantity',data.quantity??1,'number')+field('Location / cloud','location',data.location||'');
- if(kind==='extras')row.innerHTML=field('Charge','description',data.description||'','text',null,150)+field('Qty','quantity',data.quantity??1,'number')+field('Unit rate','rate',data.rate??0,'number')+field('Cadence','cadence',data.cadence||'monthly','text',['monthly','one-time'])+field('Taxable','taxable',data.taxable||false,'checkbox');
+ if(kind==='extras')row.innerHTML=field('Charge','description',data.description||'','text',null,150)+field('Qty','quantity',data.quantity??1,'number')+field('Unit','unit',data.unit??'users','text',null,40)+field('Unit rate','rate',data.rate??0,'number')+field('Cadence','cadence',data.cadence||'monthly','text',['monthly','one-time'])+field('Card','category',data.category??guessCard(data.description),'text',CARDS)+field('Taxable','taxable',data.taxable||false,'checkbox');
  if(kind==='services')row.innerHTML=field('Service','description',data.description||'','text',null,350)+field('Frequency','frequency',data.frequency||'Ongoing','text',null,80)+field('Coverage','status',data.status||'Included','text',['Included','Excluded','Not applicable']);
  row.querySelectorAll('input[data-key=description]').forEach(el=>el.required=true);
  const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove row');remove.onclick=()=>{row.remove();dirty();scheduleQuote();};row.append(remove);$('#'+kind).append(row);
@@ -147,14 +149,15 @@ function renderRecap(){
  const block=(n,title,rows)=>`<section class="recap-block"><header><h3>${title}</h3><button type="button" class="linklike" data-go="${n}">Edit</button></header><dl>${rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></section>`;
  const discovery=DISCOVERY.filter(([k])=>d[k]).map(([k,label])=>[label,escapeHtml(d[k])]);
  const assets=d.assets.length?d.assets.map(a=>`${a.quantity} × ${escapeHtml(a.kind)} — ${escapeHtml(a.description)}${a.location?' ('+escapeHtml(a.location)+')':''}`).join('<br>'):'<em>No equipment listed</em>';
- const billed=q?q.lines.map(x=>`${escapeHtml(x.description)}: ${x.quantity} × ${currency(x.rate)} = ${currency(x.total)}${x.cadence==='monthly'?'/mo':' once'}`).join('<br>'):'<em>Pricing unavailable</em>';
+ const CARD={core:'Managed Services',security:'Cybersecurity',backup:'Backup',onboarding:'One-time setup',other:'not on slide'};
+ const billed=q?q.lines.map(x=>`${escapeHtml(x.description)}: ${x.quantity} × ${currency(x.rate)} = ${currency(x.total)}${x.cadence==='monthly'?'/mo':' once'} <span class="muted">(${CARD[x.cadence==='monthly'||x.category==='onboarding'?x.category:'other']})</span>`).join('<br>'):'<em>Pricing unavailable</em>';
  const scope={Included:0,Excluded:0,'Not applicable':0};d.services.forEach(s=>scope[s.status]=(scope[s.status]||0)+1);
  $('#recap').innerHTML=
   block(1,'Client',[['Company',yes(d.client)],['Contact',yes([d.contact,d.email,d.phone].filter(Boolean).join(' · '))],['Address',yes(d.address).replace(/\n/g,'<br>')],['Proposal date',yes(d.proposal_date)],['Prepared by',yes(d.prepared_by)]])+
-  block(2,'Engagement',[['Billing model',BILLING[d.billing_mode]],['Counts',`${d.users} users · ${d.workstations} workstations · ${d.servers} servers`],['Term',`${d.term_months} months initial · ${d.renewal_months} months renewal · ${d.notice_days} days notice`],['MSA date',d.msa_date||'<em>To be confirmed</em>'],['SOW effective',d.effective_date||'<em>To be confirmed</em>']])+
-  block(3,'Discovery',discovery.length?discovery:[['Notes','<em>No discovery notes</em>']])+
+  block(2,'Engagement',[['Billing model',BILLING[d.billing_mode]],['Counts',`${d.users} users · ${d.workstations} workstations · ${d.servers} servers · ${d.networks} networks · ${d.mobile_devices} mobile devices`],['Term',`${d.term_months} months initial · ${d.renewal_months} months renewal · ${d.notice_days} days notice`],['MSA date',d.msa_date||'<em>To be confirmed</em>'],['SOW effective',d.effective_date||'<em>To be confirmed</em>']])+
+  block(3,'Discovery',[['Current state (slide)',d.current_state.trim()?d.current_state.split('\n').filter(x=>x.trim()).map(escapeHtml).join('<br>'):'<em>Workstation and server counts</em>'],...discovery])+
   block(4,'Inventory',[['Equipment',assets]])+
-  block(5,'Pricing',[['Line items',billed],['Monthly',q?`${currency(q.monthly)} (discount ${currency(q.discount)}, tax ${currency(q.tax)})`:'—'],['One-time',q?currency(q.one_time):'—'],['Term total',q?currency(q.term_total):'—'],['Hourly',`${currency(d.hourly_rate)} onsite · ${currency(d.after_hours_rate)} after hours`],['Tax review',d.tax_reviewed?'Reviewed':'<strong>Not reviewed</strong>']])+
+  block(5,'Pricing',[['Line items',billed],['Monthly',q?`${currency(q.net)} before tax (discount ${currency(q.discount)}); ${currency(q.monthly)} with ${currency(q.tax)} tax`:'—'],['Backup card label',escapeHtml(d.backup_label)],['One-time',q?currency(q.one_time):'—'],['Term total',q?currency(q.term_total):'—'],['Hourly',`${currency(d.hourly_rate)} onsite · ${currency(d.after_hours_rate)} after hours`],['Tax review',d.tax_reviewed?'Reviewed':'<strong>Not reviewed</strong>']])+
   block(6,'Scope',[['Services',`${scope.Included} included · ${scope.Excluded} excluded · ${scope['Not applicable']} not applicable`],['Exclusions',yes(d.exclusions)]]);
 }
 

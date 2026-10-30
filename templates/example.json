@@ -34,13 +34,17 @@
       "description": "Cybersecurity protection",
       "quantity": 2,
       "rate": "25",
-      "cadence": "monthly"
+      "cadence": "monthly",
+      "category": "security",
+      "unit": "users"
     },
     {
       "description": "Cloud-to-cloud backup",
       "quantity": 2,
       "rate": "20",
-      "cadence": "monthly"
+      "cadence": "monthly",
+      "category": "backup",
+      "unit": "users"
     }
   ],
   "services": [
@@ -207,5 +211,9 @@
   ],
   "unresolved": "Fictional demonstration only. Confirm all quantities, rates, scope and tax treatment for each client.",
   "billing_mode": "devices",
-  "term_months": 36
+  "term_months": 36,
+  "current_state": "4 desktops/laptops\nUnresponsive remote IT provider",
+  "backup_label": "Cloud",
+  "networks": 1,
+  "mobile_devices": 0
 }

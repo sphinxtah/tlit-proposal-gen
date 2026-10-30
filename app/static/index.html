@@ -35,10 +35,13 @@
 <label class="choice"><input type="radio" name="billing_mode" value="devices"><span><strong>Per workstation / server only</strong><small>Rates per workstation and server. User count is recorded for reference.</small></span></label>
 </fieldset>
 <div class="grid three"><label>Supported users<input name="users" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"><small class="hint" data-hint="users"></small></label><label>Workstations<input name="workstations" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"><small class="hint" data-hint="devices"></small></label><label>Servers<input name="servers" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"><small class="hint" data-hint="devices"></small></label></div>
+<div class="grid three"><label>Managed networks<input name="networks" type="number" min="0" max="100000" step="1" value="1" inputmode="numeric"><small class="hint">Listed under Covered Users & Equipment in Schedule C.</small></label><label>Managed mobile devices<input name="mobile_devices" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"><small class="hint">Listed in Schedule C; not billed.</small></label></div>
 <div class="grid three"><label>Initial term (months)<input name="term_months" type="number" min="1" max="120" value="36" required></label><label>Renewal term (months)<input name="renewal_months" type="number" min="1" max="120" value="12" required></label><label>Nonrenewal notice (days)<input name="notice_days" type="number" min="90" max="90" value="90" readonly><small class="hint">Fixed by Schedule A.</small></label></div>
-<div class="grid"><label>MSA date<input name="msa_date" type="date"><small class="hint">Leave blank if the Master Services Agreement is not signed yet; the PDF will say "To be confirmed".</small></label><label>SOW effective date<input name="effective_date" type="date"><small class="hint">When managed services begin.</small></label></div></section>
+<div class="grid"><label>MSA date<input name="msa_date" type="date"><small class="hint">Leave blank if the Master Services Agreement is not signed yet; the agreement shows a blank date line.</small></label><label>SOW effective date<input name="effective_date" type="date"><small class="hint">When managed services begin.</small></label></div></section>
 
-<section class="step" data-step="3" id="discovery"><div class="section-title"><span>03</span><div><h2>What does their environment look like today?</h2><p>Discovery notes flow into the proposal deck and the services agreement. Blank fields are simply omitted.</p></div></div><div class="grid" id="discoveryFields"></div></section>
+<section class="step" data-step="3" id="discovery"><div class="section-title"><span>03</span><div><h2>What does their environment look like today?</h2><p>The current state appears on the “From Current State to Safe Environment” slide. The other notes are kept with the proposal for your team.</p></div></div>
+<label class="full current-state">Current state — one bullet per line<textarea name="current_state" maxlength="2000" rows="3" placeholder="4 desktops/laptops&#10;Non-responsive remote MSP"></textarea><small class="hint">Leave blank to list the workstation and server counts.</small></label>
+<div class="grid" id="discoveryFields"></div></section>
 
 <section class="step" data-step="4" id="inventory"><div class="section-title"><span>04</span><div><h2>What equipment is in scope?</h2><p>Detailed inventory stays separate from billing counts. Mismatches are flagged, not blocked.</p></div></div>
 <div id="inventoryCheck" class="notice"></div>
@@ -53,7 +56,8 @@
 <label>Tax rate on taxable items (%)<input name="tax_percent" type="number" min="0" max="100" step="0.001" value="0" inputmode="decimal"></label>
 <label>Onsite / project rate ($/hour)<input name="hourly_rate" type="number" min="0" step="0.01" value="135" inputmode="decimal"></label>
 <label>After-hours rate ($/hour)<input name="after_hours_rate" type="number" min="0" step="0.01" value="202" inputmode="decimal"></label></div>
-<details open><summary>Additional line items</summary><p class="muted">Manual entries for existing charges such as security or cloud backup. A vendor service catalog is planned next.</p><div id="extras"></div><button type="button" id="addExtra" class="secondary">＋ Add charge</button></details>
+<details open><summary>Additional line items</summary><p class="muted">Charges such as cybersecurity or cloud backup. <strong>Card</strong> chooses which box shows the charge on the pricing slide; <strong>Unit</strong> is the word in “2 users × $25.00”. Charges marked Other are included in the totals but not itemised on the slide.</p>
+<label class="backup-label">Backup card label (shown above “Backup”)<input name="backup_label" maxlength="40" value="Cloud" placeholder="Google Cloud"></label><div id="extras"></div><button type="button" id="addExtra" class="secondary">＋ Add charge</button></details>
 <div class="notice">Tax depends on the service, software licensing, and transaction location. Scottsdale lists 8.00% for most taxable activities; that is not automatically the correct rate for every client. See the tax research notes before applying a rate.</div>
 <label>Tax classification / sourcing notes<textarea name="tax_notes" maxlength="2000" rows="2"></textarea></label><label class="check"><input type="checkbox" name="tax_reviewed"> Tax classification and sourcing reviewed</label></section>
 
@@ -61,12 +65,12 @@
 <button type="button" id="loadScope" class="secondary">Load reference scope</button><div id="services"></div><button type="button" id="addService" class="secondary">＋ Add service</button>
 <label>Exclusions<textarea name="exclusions" maxlength="2000" rows="3">Printer management is provided by another MSP and is excluded.</textarea></label></section>
 
-<section class="step" data-step="7" id="review"><div class="section-title"><span>07</span><div><h2>Review & export</h2><p>Check every answer, resolve warnings, then generate the PowerPoint proposal and PDF services agreement.</p></div></div>
+<section class="step" data-step="7" id="review"><div class="section-title"><span>07</span><div><h2>Review & export</h2><p>Check every answer, resolve warnings, then generate the PowerPoint proposal and Word services agreement.</p></div></div>
 <div id="recap"></div>
 <label>Open questions / internal review notes<textarea name="unresolved" maxlength="2000" rows="3"></textarea></label>
 <div id="warnings"></div>
-<p class="muted">Review service scope, contract wording and tax settings before sending to a client. The PDF includes the original Schedule A wording and a blank payment authorization form.</p>
-<button id="generate" type="button">Generate PPTX + PDF ↓</button><p id="exportState" role="status"></p></section>
+<p class="muted">Review service scope, contract wording and tax settings before sending to a client. Both documents keep the original reference design: the agreement includes the Schedule A wording and the blank payment authorization form.</p>
+<button id="generate" type="button">Generate PPTX + DOCX ↓</button><p id="exportState" role="status"></p></section>
 
 <div class="wizard-nav"><button type="button" id="back" class="secondary">← Back</button><span id="stepCounter" class="muted"></span><button type="button" id="next">Next →</button></div>
 </form>

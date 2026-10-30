@@ -1,12 +1,24 @@
-# TeamLogic IT Proposal Studio v0.2.0
+# TeamLogic IT Proposal Studio v0.3.0
 
-Internal intake, pricing, editable PowerPoint proposals, and PDF managed services agreements. Runs without Microsoft Office in production.
+Internal intake, pricing, editable PowerPoint proposals and Word (DOCX) managed services agreements. Both documents reproduce the completed ProjectCenter reference proposal exactly (design, layout, formatting); only client-specific values change. Runs without Microsoft Office in production.
 
 ## Public repository and local data
 
 The checked-in example is fictional. Original client documents, generated exports, SQLite databases, credentials, and local overrides are excluded from Git. A local `templates/example.private.json` can replace the demo through an ignored `compose.override.yaml` read-only mount; it is also excluded from the Docker image. Never commit real client records or completed payment forms.
 
-The template extraction helper accepts `--document`, `--presentation`, `--client-name` and `--proposal-month`. It is tailored to the original reference structure; inspect extracted content before committing templates from another source.
+The template extraction helper (`scripts/prepare_templates.py`) builds `templates/proposal.pptx` and `templates/agreement.docx` from the original reference files, replacing client values with `{{tokens}}` and removing slide numbers. It accepts `--document`, `--presentation`, `--client-name`, `--proposal-month` and repeatable `--private-marker` values (contact name, street, phone) that it verifies are gone. It is tailored to the original reference structure; inspect output before committing templates from another source.
+
+### What fills the reference slides and SOW
+
+| Output | Source in the wizard |
+|---|---|
+| Slide 11 "Current State" bullets | Discovery → Current state (one per line; blank lists workstation/server counts) |
+| Slide 12 headline, Core Support card | Net monthly before tax; user/workstation/server lines |
+| Slide 12 Cybersecurity / Backup cards | Additional line items with Card = Cybersecurity / Backup (a card with no charges is removed); Backup card label |
+| Slide 12 one-time setup, slide 13 hourly rates | Onboarding fee; onsite and after-hours rates |
+| SOW cover, Schedule B, Schedule C | Client details, dates, term, fees; service scope (rows not in scope are removed, custom services added under "Additional Services"); hourly rates and covered equipment counts |
+
+Charges with Card = Other, one-time extras, discounts and tax are included in totals but not itemised on slide 12; the Review step warns when that happens. Discovery notes, inventory, exclusions and tax notes are kept with the proposal (and in `proposal-data.json`) but do not appear in either document, because the reference proposal has no place for them.
 
 ## Local start
 
@@ -16,7 +28,7 @@ docker compose -p tlit-proposal-gen exec app python -m app.manage add-user your-
 docker compose -p tlit-proposal-gen exec app python -m app.manage add-user tal
 ```
 
-The commands prompt privately for passwords (12+ characters). There are no default/shared credentials. Open http://localhost:8088 and sign in. New proposals run through a seven-step wizard (Client → Engagement → Discovery → Inventory → Pricing → Scope → Review & export). The billing model chosen in step 2 decides which rate questions appear in step 5; step 7 shows a recap of every answer with Edit links and the server-side warnings before export. Load the Example Company example to exercise the full workflow. Save a draft, review pricing/scope/tax notes, then generate the ZIP containing PPTX, PDF, input JSON and a manifest.
+The commands prompt privately for passwords (12+ characters). There are no default/shared credentials. Open http://localhost:8088 and sign in. New proposals run through a seven-step wizard (Client → Engagement → Discovery → Inventory → Pricing → Scope → Review & export). The billing model chosen in step 2 decides which rate questions appear in step 5; step 7 shows a recap of every answer with Edit links and the server-side warnings before export. Load the Example Company example to exercise the full workflow. Save a draft, review pricing/scope/tax notes, then generate the ZIP containing `<Client>_IT_Proposal.pptx`, `TeamLogicIT - Managed IT Services-<Client>.docx`, input JSON and a manifest.
 
 In Docker Desktop's **Exec** tab you are already inside the container. Run `python -m app.manage add-user your-username` there, without the `docker compose exec app` prefix. Password input is intentionally invisible.
 
@@ -72,7 +84,8 @@ Store the backup securely with a copy of `templates/`. Restore only to a stopped
 - `app/main.py`: authenticated API, drafts, sessions and export.
 - `app/manage.py`: private account provisioning/reset.
 - `app/static/`: responsive wizard UI (`app.js` steps/validation/recap, `history.js` revision panel), no frontend build step.
-- `app/generate.py`: template PPTX and flowing PDF renderers.
+- `app/generate.py`: fills `templates/proposal.pptx` and `templates/agreement.docx`; adds no slides, pages or styling.
+- `app/textfill.py`: formatting-preserving token replacement for Word and PowerPoint paragraphs.
 - `templates/`: editable PPTX, extracted contract text, scope and example JSON.
 - `scripts/prepare_templates.py`: one-time extraction from originals (requires python-docx outside production image).
 - `docs/PLAN.md`: scope, architecture, known template issues and next increments.

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0 — Reference-faithful documents
+
+- Proposal slides 11–13 (Current State, Pricing, Hourly Rates) are now the original reference slides with client values filled in, instead of generated text slides. Generated decks match the reference deck exactly for the ProjectCenter data.
+- Slide numbers ("11 / 14") removed from every slide.
+- The managed services agreement is generated as a Word document from the original SOW (cover page, Schedules A–C, payment form) instead of a re-typeset PDF. `reportlab` and `pypdf` are no longer dependencies; `python-docx` is.
+- Export ZIP entries are named like the reference files: `<Client>_IT_Proposal.pptx` and `TeamLogicIT - Managed IT Services-<Client>.docx`.
+- New wizard inputs: current-state bullets, managed networks and mobile devices, backup card label, and per-charge Card (Cybersecurity / Backup / Other) and Unit. Older drafts get a Card guessed from the charge description.
+- Review warnings when a charge, discount or tax would not be itemised on the pricing slide.
+- `scripts/prepare_templates.py` rewritten to tokenise both originals and refuse to write templates that still contain client data.
+
 ## v0.2.0 — Wizard intake and hardening
 
 - New proposals are entered through a seven-step wizard with a progress stepper, per-step validation, Back/Next navigation, deep-linkable steps and a Review & export recap with Edit links. Saved proposals open on the recap.
