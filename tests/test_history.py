@@ -38,7 +38,7 @@ def test_history_restoration_conflicts_and_exact_export(client):
     hist=client.get('/api/proposals/'+pid+'/history').json();eid=hist[0]['exports'][0]['id']
     assert client.get('/api/exports/'+eid).content==output.content
     manifest=json.loads(zipfile.ZipFile(io.BytesIO(output.content)).read('generation-manifest.json'))
-    assert manifest['app_version']=='0.1.0' and manifest['version']==4
+    assert manifest['app_version']=='0.2.0' and manifest['version']==4
     with storage.connect() as db:
         db.execute("UPDATE revisions SET created_at='2020-01-01T00:00:00.000000Z' WHERE proposal_id=?",(pid,))
     assert storage.compress_history()==4

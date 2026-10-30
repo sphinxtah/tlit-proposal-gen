@@ -1,4 +1,4 @@
-# TeamLogic IT Proposal Studio v0.1.0
+# TeamLogic IT Proposal Studio v0.2.0
 
 Internal intake, pricing, editable PowerPoint proposals, and PDF managed services agreements. Runs without Microsoft Office in production.
 
@@ -16,7 +16,7 @@ docker compose -p tlit-proposal-gen exec app python -m app.manage add-user your-
 docker compose -p tlit-proposal-gen exec app python -m app.manage add-user tal
 ```
 
-The commands prompt privately for passwords (12+ characters). There are no default/shared credentials. Open http://localhost:8088 and sign in. Load the Example Company example to exercise the full workflow. Save a draft, review pricing/scope/tax notes, then generate the ZIP containing PPTX, PDF, input JSON and a manifest.
+The commands prompt privately for passwords (12+ characters). There are no default/shared credentials. Open http://localhost:8088 and sign in. New proposals run through a seven-step wizard (Client → Engagement → Discovery → Inventory → Pricing → Scope → Review & export). The billing model chosen in step 2 decides which rate questions appear in step 5; step 7 shows a recap of every answer with Edit links and the server-side warnings before export. Load the Example Company example to exercise the full workflow. Save a draft, review pricing/scope/tax notes, then generate the ZIP containing PPTX, PDF, input JSON and a manifest.
 
 In Docker Desktop's **Exec** tab you are already inside the container. Run `python -m app.manage add-user your-username` there, without the `docker compose exec app` prefix. Password input is intentionally invisible.
 
@@ -28,7 +28,7 @@ Only this Compose project is created/modified. It has its own `tlit-proposal-gen
 docker compose -p tlit-proposal-gen exec app python -m pytest -q
 ```
 
-Tests use a temporary database, never the working proposal database. Covers billing modes, Decimal math, taxable allocation, invalid inputs, authentication, draft persistence, ZIP/document content and long-content pagination.
+Tests use a temporary database, never the working proposal database. Covers billing modes, Decimal math, taxable allocation, invalid inputs, authentication, draft persistence, ZIP/document content, long-content pagination, revision history, security headers, rate-limit keying, legacy-revision restores and export filenames. `node scripts/browser-smoke.cjs` (Playwright + Chrome on the host) walks the wizard end to end against the running container.
 
 ## Acadia deployment (dedicated Debian 13 VM)
 
@@ -41,7 +41,7 @@ docker compose -p tlit-proposal-gen exec app python -m app.manage add-user YOUR_
 docker compose -p tlit-proposal-gen exec app python -m app.manage add-user tal
 ```
 
-For intranet access, place an HTTPS reverse proxy on the Debian VM in front of `127.0.0.1:8088` and point an internal DNS name at it. Set `COOKIE_SECURE=true` in the container environment via a Compose override for HTTPS. Default cookie behavior supports localhost HTTP development. Do not expose the Docker socket to the app. This project has not been deployed to Acadia: VM address/DNS/access details are still needed.
+For intranet access, place an HTTPS reverse proxy on the Debian VM in front of `127.0.0.1:8088` and point an internal DNS name at it. Set `COOKIE_SECURE=true` in the container environment via a Compose override for HTTPS. Also set `TRUST_PROXY=true` there so login rate limiting keys on the first `X-Forwarded-For` address instead of the proxy's address; without it, every visitor behind the proxy (or behind Docker Desktop's port forwarding) shares one 10-attempt lockout window. Default cookie behavior supports localhost HTTP development. Do not expose the Docker socket to the app. This project has not been deployed to Acadia: VM address/DNS/access details are still needed.
 
 If a separate reverse-proxy container is used, connect only that proxy to this project's network and route it to `app:8000`. No internet-facing access is required. Provision the local TLS certificate through your intranet's trust/certificate process.
 
@@ -71,7 +71,7 @@ Store the backup securely with a copy of `templates/`. Restore only to a stopped
 - `app/models.py`: validated intake schema and authoritative pricing.
 - `app/main.py`: authenticated API, drafts, sessions and export.
 - `app/manage.py`: private account provisioning/reset.
-- `app/static/`: responsive browser UI, no frontend build step.
+- `app/static/`: responsive wizard UI (`app.js` steps/validation/recap, `history.js` revision panel), no frontend build step.
 - `app/generate.py`: template PPTX and flowing PDF renderers.
 - `templates/`: editable PPTX, extracted contract text, scope and example JSON.
 - `scripts/prepare_templates.py`: one-time extraction from originals (requires python-docx outside production image).

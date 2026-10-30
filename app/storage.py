@@ -97,6 +97,14 @@ def compress_history(now=None):
                 count+=1
     return count
 
+def purge_expired(now=None):
+    """Drop expired sessions and finished login-attempt windows so the tables do not grow forever."""
+    now=now if now is not None else datetime.now(timezone.utc).timestamp()
+    with connect() as db:
+        sessions=db.execute('DELETE FROM sessions WHERE expires<=?',(now,)).rowcount
+        attempts=db.execute('DELETE FROM attempts WHERE started<=?',(now-900,)).rowcount
+    return sessions+attempts
+
 def cleanup_plan(db, boundary):
     # Latest proposal activity governs whole-proposal removal. Historical revisions
     # of active proposals are independently eligible by their own save timestamp.

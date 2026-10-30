@@ -2,16 +2,86 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TeamLogic IT · Proposal Studio</title><link rel="stylesheet" href="/static/style.css"></head>
 <body>
 <div id="login" class="login"><form id="loginForm"><div class="brand">TeamLogic<span>IT</span></div><p class="eyebrow">SCOTTSDALE / PROPOSAL STUDIO</p><h1>Good proposals<br>start here.</h1><p>Sign in to prepare your next client engagement.</p><label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button>Sign in →</button><p id="loginError" role="alert"></p><small>First time? Create your local account using the setup instructions in README.md.</small></form></div>
+
 <div id="studio" hidden>
-<aside><div class="brand">TeamLogic<span>IT</span></div><p class="eyebrow">PROPOSAL STUDIO</p><button id="new" class="wide">＋ New proposal</button><div class="side-label">WORKSPACE</div><nav><a href="#client">01 &nbsp; Client details</a><a href="#discovery">02 &nbsp; Discovery</a><a href="#inventory">03 &nbsp; Inventory</a><a href="#pricing">04 &nbsp; Pricing & terms</a><a href="#scope">05 &nbsp; Service scope</a><a href="#review">06 &nbsp; Review & export</a></nav><div class="side-label">SAVED PROPOSALS</div><div id="saved"></div><div class="aside-bottom"><span id="who"></span><button id="logout" class="quiet">Sign out</button></div></aside>
-<main><header><div><p class="eyebrow">FROM DISCOVERY TO DELIVERY</p><h1>Your next partnership.</h1><p class="muted">Capture the details. Build the scope. Let the math take care of itself.</p></div><button id="example" class="secondary">Load Example Company example</button></header>
+<aside>
+<div class="brand">TeamLogic<span>IT</span></div><p class="eyebrow">PROPOSAL STUDIO</p>
+<button id="new" class="wide">＋ New proposal</button>
+<div class="side-label">PROPOSAL STEPS</div><nav id="stepNav" aria-label="Proposal steps"></nav>
+<div class="side-label">RECORDS</div><nav><button type="button" class="navlink" id="navHistory" data-panel="history">Version history</button></nav>
+<div class="side-label">SAVED PROPOSALS</div><div id="saved"></div>
+<div class="aside-bottom"><span id="who"></span><button id="logout" class="quiet">Sign out</button></div>
+<p id="release" class="summary-note"></p>
+</aside>
+
+<main>
+<header><div><p class="eyebrow" id="headerEyebrow">NEW PROPOSAL</p><h1 id="headerTitle">Let's qualify this engagement.</h1><p class="muted" id="headerSub">Answer each step in order. Totals update as you go, and you can revisit any step before exporting.</p></div><button id="example" class="secondary">Load Example Company example</button></header>
 <div class="toolbar"><span id="draftState">New proposal · not saved</span><button id="save">Save draft</button></div><div id="message" role="status"></div>
-<form id="proposalForm">
-<section id="client"><div class="section-title"><span>01</span><div><h2>Client details</h2><p>The people behind the partnership.</p></div></div><div class="grid">
-<label class="full">Company name<input name="client" maxlength="100" required placeholder="Client company"></label><label>Primary contact<input name="contact" maxlength="120"></label><label>Email<input name="email" maxlength="160" type="email"></label><label>Phone<input name="phone" maxlength="80"></label><label>Prepared by<input name="prepared_by" maxlength="120"></label><label class="full">Address<textarea name="address" maxlength="500" rows="2"></textarea></label><label>Proposal date<input name="proposal_date" type="date" required></label><label>SOW effective date<input name="effective_date" type="date"></label><label>MSA date<input name="msa_date" type="date"></label></div></section>
-<section id="discovery"><div class="section-title"><span>02</span><div><h2>Discovery notes</h2><p>What they use today, and where they need help.</p></div></div><div class="grid" id="discoveryFields"></div></section>
-<section id="inventory"><div class="section-title"><span>03</span><div><h2>Users & equipment</h2><p>Billing counts stay separate from the detailed inventory, with mismatch checks.</p></div></div><div class="grid three"><label>Users<input name="users" type="number" min="0" max="100000" step="1" value="0"></label><label>Workstations<input name="workstations" type="number" min="0" max="100000" step="1" value="0"></label><label>Servers<input name="servers" type="number" min="0" max="100000" step="1" value="0"></label></div><div id="assets"></div><button type="button" id="addAsset" class="secondary">＋ Add equipment</button></section>
-<section id="pricing"><div class="section-title"><span>04</span><div><h2>Pricing & terms</h2><p>One calculation, shared by the proposal and services agreement.</p></div></div><div class="grid"><label class="full">Billing model<select name="billing_mode"><option value="combined">Per user + per device</option><option value="users">Per user only</option><option value="devices">Per workstation / server only</option></select></label><label>Managed services / user / month<input name="user_rate" type="number" min="0" step="0.01" value="0"><span><input name="user_taxable" type="checkbox"> Taxable</span></label><label>Monitoring & support / workstation / month<input name="workstation_rate" type="number" min="0" step="0.01" value="0"><span><input name="workstation_taxable" type="checkbox"> Taxable</span></label><label>Monitoring & support / server / month<input name="server_rate" type="number" min="0" step="0.01" value="0"><span><input name="server_taxable" type="checkbox"> Taxable</span></label><label>Flat onboarding fee<input name="onboarding" type="number" min="0" step="0.01" value="500"><span><input name="onboarding_taxable" type="checkbox"> Taxable</span></label><label>Monthly discount ($)<input name="discount" type="number" min="0" step="0.01" value="0"></label><label>Tax rate on taxable items (%)<input name="tax_percent" type="number" min="0" max="100" step="0.001" value="0"></label><label>Initial term (months)<input name="term_months" type="number" min="1" max="120" value="36"></label><label>Renewal term (months)<input name="renewal_months" type="number" min="1" max="120" value="12"></label><label>Nonrenewal notice (days)<input name="notice_days" type="number" min="90" max="90" value="90" readonly></label><label>Onsite / project rate ($/hour)<input name="hourly_rate" type="number" min="0" step="0.01" value="135"></label><label>After-hours rate ($/hour)<input name="after_hours_rate" type="number" min="0" step="0.01" value="202"></label></div><details><summary>Additional line items</summary><p class="muted">Manual entries for existing example charges. A vendor service catalog is planned next.</p><div id="extras"></div><button type="button" id="addExtra" class="secondary">＋ Add charge</button></details><div class="notice">Tax depends on the service, software licensing, and transaction location. Scottsdale lists 8.00% for most taxable activities; that is not automatically the correct rate for every client. See the tax research notes before applying a rate.</div><label>Tax classification / sourcing notes<textarea name="tax_notes" maxlength="2000" rows="2"></textarea></label><label class="check"><input type="checkbox" name="tax_reviewed"> Tax classification and sourcing reviewed</label></section>
-<section id="scope"><div class="section-title"><span>05</span><div><h2>Service scope</h2><p>Explicit coverage for Schedule B.</p></div></div><button type="button" id="loadScope" class="secondary">Load reference scope</button><div id="services"></div><button type="button" id="addService" class="secondary">＋ Add service</button><label>Exclusions<textarea name="exclusions" maxlength="2000" rows="3">Printer management is provided by another MSP and is excluded.</textarea></label></section>
-<section id="review"><div class="section-title"><span>06</span><div><h2>Review & export</h2><p>A PowerPoint proposal and a clean PDF services agreement.</p></div></div><label>Open questions / internal review notes<textarea name="unresolved" maxlength="2000" rows="3"></textarea></label><div id="warnings"></div><p class="muted">Review service scope, contract wording and tax settings before sending to a client. The PDF includes the original Schedule A wording and a blank payment authorization form.</p><button id="generate" type="button">Generate PPTX + PDF ↓</button><p id="exportState" role="status"></p></section></form>
-</main><aside class="summary"><p class="eyebrow">ENGAGEMENT SUMMARY</p><h3 id="summaryClient">New client</h3><p class="muted">MONTHLY INVESTMENT</p><div id="monthly" class="total">$0.00</div><div id="breakdown"></div><hr><div class="sumrow"><span>One-time charges</span><strong id="once">$500.00</strong></div><div class="sumrow"><span>First month + setup</span><strong id="first">$500.00</strong></div><div class="sumrow"><span>Initial term total</span><strong id="term">$500.00</strong></div><p class="summary-note">Calculated by the server.<br>All amounts in USD.</p></aside></div><script src="/static/app.js"></script><script src="/static/history.js"></script></body></html>
+
+<div id="wizard">
+<ol class="stepper" id="stepper" aria-label="Progress"></ol>
+<form id="proposalForm" novalidate>
+
+<section class="step" data-step="1" id="client"><div class="section-title"><span>01</span><div><h2>Who is the client?</h2><p>The people behind the partnership. Only the company name and proposal date are required to continue.</p></div></div><div class="grid">
+<label class="full">Company name<input name="client" maxlength="100" required placeholder="Client company" autocomplete="organization"></label>
+<label>Primary contact<input name="contact" maxlength="120"></label><label>Email<input name="email" maxlength="160" type="email"></label><label>Phone<input name="phone" maxlength="80" type="tel"></label><label>Prepared by<input name="prepared_by" maxlength="120"></label>
+<label class="full">Address<textarea name="address" maxlength="500" rows="2"></textarea></label>
+<label>Proposal date<input name="proposal_date" type="date" required></label></div></section>
+
+<section class="step" data-step="2" id="engagement"><div class="section-title"><span>02</span><div><h2>How will this engagement be billed?</h2><p>These answers decide which pricing questions you see next and how the agreement term reads.</p></div></div>
+<fieldset class="choices"><legend>Billing model</legend>
+<label class="choice"><input type="radio" name="billing_mode" value="combined" checked><span><strong>Per user + per device</strong><small>Managed services per user plus monitoring per workstation and server.</small></span></label>
+<label class="choice"><input type="radio" name="billing_mode" value="users"><span><strong>Per user only</strong><small>One rate per supported user. Device counts are still recorded for inventory.</small></span></label>
+<label class="choice"><input type="radio" name="billing_mode" value="devices"><span><strong>Per workstation / server only</strong><small>Rates per workstation and server. User count is recorded for reference.</small></span></label>
+</fieldset>
+<div class="grid three"><label>Supported users<input name="users" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"><small class="hint" data-hint="users"></small></label><label>Workstations<input name="workstations" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"><small class="hint" data-hint="devices"></small></label><label>Servers<input name="servers" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"><small class="hint" data-hint="devices"></small></label></div>
+<div class="grid three"><label>Initial term (months)<input name="term_months" type="number" min="1" max="120" value="36" required></label><label>Renewal term (months)<input name="renewal_months" type="number" min="1" max="120" value="12" required></label><label>Nonrenewal notice (days)<input name="notice_days" type="number" min="90" max="90" value="90" readonly><small class="hint">Fixed by Schedule A.</small></label></div>
+<div class="grid"><label>MSA date<input name="msa_date" type="date"><small class="hint">Leave blank if the Master Services Agreement is not signed yet; the PDF will say "To be confirmed".</small></label><label>SOW effective date<input name="effective_date" type="date"><small class="hint">When managed services begin.</small></label></div></section>
+
+<section class="step" data-step="3" id="discovery"><div class="section-title"><span>03</span><div><h2>What does their environment look like today?</h2><p>Discovery notes flow into the proposal deck and the services agreement. Blank fields are simply omitted.</p></div></div><div class="grid" id="discoveryFields"></div></section>
+
+<section class="step" data-step="4" id="inventory"><div class="section-title"><span>04</span><div><h2>What equipment is in scope?</h2><p>Detailed inventory stays separate from billing counts. Mismatches are flagged, not blocked.</p></div></div>
+<div id="inventoryCheck" class="notice"></div>
+<div id="assets"></div><button type="button" id="addAsset" class="secondary">＋ Add equipment</button></section>
+
+<section class="step" data-step="5" id="pricing"><div class="section-title"><span>05</span><div><h2>What will it cost?</h2><p>One calculation, shared by the proposal and services agreement. Only the rates for your billing model are shown.</p></div></div><div class="grid">
+<label data-billing="users">Managed services / user / month<input name="user_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="user_taxable" type="checkbox"> Taxable</span></label>
+<label data-billing="devices">Monitoring & support / workstation / month<input name="workstation_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="workstation_taxable" type="checkbox"> Taxable</span></label>
+<label data-billing="devices">Monitoring & support / server / month<input name="server_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="server_taxable" type="checkbox"> Taxable</span></label>
+<label>Flat onboarding fee<input name="onboarding" type="number" min="0" step="0.01" value="500" inputmode="decimal"><span><input name="onboarding_taxable" type="checkbox"> Taxable</span></label>
+<label>Monthly discount ($)<input name="discount" type="number" min="0" step="0.01" value="0" inputmode="decimal"></label>
+<label>Tax rate on taxable items (%)<input name="tax_percent" type="number" min="0" max="100" step="0.001" value="0" inputmode="decimal"></label>
+<label>Onsite / project rate ($/hour)<input name="hourly_rate" type="number" min="0" step="0.01" value="135" inputmode="decimal"></label>
+<label>After-hours rate ($/hour)<input name="after_hours_rate" type="number" min="0" step="0.01" value="202" inputmode="decimal"></label></div>
+<details open><summary>Additional line items</summary><p class="muted">Manual entries for existing charges such as security or cloud backup. A vendor service catalog is planned next.</p><div id="extras"></div><button type="button" id="addExtra" class="secondary">＋ Add charge</button></details>
+<div class="notice">Tax depends on the service, software licensing, and transaction location. Scottsdale lists 8.00% for most taxable activities; that is not automatically the correct rate for every client. See the tax research notes before applying a rate.</div>
+<label>Tax classification / sourcing notes<textarea name="tax_notes" maxlength="2000" rows="2"></textarea></label><label class="check"><input type="checkbox" name="tax_reviewed"> Tax classification and sourcing reviewed</label></section>
+
+<section class="step" data-step="6" id="scope"><div class="section-title"><span>06</span><div><h2>Which services are covered?</h2><p>Explicit coverage for Schedule B. Start from the reference scope, then adjust per client.</p></div></div>
+<button type="button" id="loadScope" class="secondary">Load reference scope</button><div id="services"></div><button type="button" id="addService" class="secondary">＋ Add service</button>
+<label>Exclusions<textarea name="exclusions" maxlength="2000" rows="3">Printer management is provided by another MSP and is excluded.</textarea></label></section>
+
+<section class="step" data-step="7" id="review"><div class="section-title"><span>07</span><div><h2>Review & export</h2><p>Check every answer, resolve warnings, then generate the PowerPoint proposal and PDF services agreement.</p></div></div>
+<div id="recap"></div>
+<label>Open questions / internal review notes<textarea name="unresolved" maxlength="2000" rows="3"></textarea></label>
+<div id="warnings"></div>
+<p class="muted">Review service scope, contract wording and tax settings before sending to a client. The PDF includes the original Schedule A wording and a blank payment authorization form.</p>
+<button id="generate" type="button">Generate PPTX + PDF ↓</button><p id="exportState" role="status"></p></section>
+
+<div class="wizard-nav"><button type="button" id="back" class="secondary">← Back</button><span id="stepCounter" class="muted"></span><button type="button" id="next">Next →</button></div>
+</form>
+</div>
+
+<section id="history" class="panel" hidden><div class="section-title"><span>⟲</span><div><h2>Version history</h2><p>Every save and export is retained until you choose to delete it.</p></div></div>
+<p class="muted">History older than one year is compressed automatically. Restore creates a new revision; previous versions stay available.</p>
+<div class="row-actions"><button id="backToProposal" class="secondary">← Back to proposal</button><button id="reloadCurrent" class="secondary">Reload current revision</button></div>
+<div id="historyRows">Save a proposal to start its history.</div>
+<button id="deleteProposal" class="danger" hidden>Delete this proposal and all history</button>
+<details><summary>Storage cleanup</summary><p>Preview and permanently delete history older than two years. Proposals with no activity for two years are removed entirely. Recent proposals and their recent revisions remain.</p><button id="cleanupPreview" class="danger">Preview records older than two years</button></details>
+</section>
+<dialog id="historyDialog"><h2 id="historyDialogTitle"></h2><pre id="historyDetail"></pre><button id="closeHistory">Close</button></dialog>
+</main>
+
+<aside class="summary"><p class="eyebrow">ENGAGEMENT SUMMARY</p><h3 id="summaryClient">New client</h3><p class="muted">MONTHLY INVESTMENT</p><div id="monthly" class="total">$0.00</div><div id="breakdown"></div><hr><div class="sumrow"><span>One-time charges</span><strong id="once">$500.00</strong></div><div class="sumrow"><span>First month + setup</span><strong id="first">$500.00</strong></div><div class="sumrow"><span>Initial term total</span><strong id="term">$500.00</strong></div><div id="summaryWarnings" class="summary-warn"></div><p class="summary-note">Calculated by the server.<br>All amounts in USD.</p></aside>
+</div>
+<script src="/static/app.js"></script><script src="/static/history.js"></script></body></html>

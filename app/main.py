@@ -3,6 +3,7 @@ import hmac
 import io
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -13,14 +14,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request, Response, Depends, Header
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from app.models import Proposal, quote
 from app.generate import pptx_bytes, pdf_bytes, TEMPLATES, VERSION
 from app.version import APP_VERSION
 from app.storage import (connect, initialize, append_revision, decode_revision,
-                         compress_history, cutoff, cleanup_plan, execute_cleanup, stamp)
+                         compress_history, cutoff, cleanup_plan, execute_cleanup, stamp, purge_expired)
 
 initialize()
 
@@ -28,6 +29,8 @@ async def maintenance():
     while True:
         try:await asyncio.to_thread(compress_history)
         except Exception:logging.exception('History compression failed; original records retained')
+        try:await asyncio.to_thread(purge_expired)
+        except Exception:logging.exception('Session purge failed')
         await asyncio.sleep(24*3600)
 
 @asynccontextmanager
@@ -39,6 +42,30 @@ async def lifespan(app):
     except asyncio.CancelledError:pass
 
 app=FastAPI(title='TeamLogic IT Proposal Generator',version=APP_VERSION,lifespan=lifespan)
+
+SECURITY_HEADERS={
+    'Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Cache-Control':'no-store'}
+
+@app.middleware('http')
+async def security_headers(request:Request,call_next):
+    response=await call_next(request)
+    for k,v in SECURITY_HEADERS.items():
+        if k=='Cache-Control' and request.url.path.startswith('/static/'):continue
+        response.headers.setdefault(k,v)
+    return response
+
+def client_ip(request:Request):
+    """Rate-limit key. Behind Docker's port proxy or an HTTPS reverse proxy every visitor shares one
+    source address, so the first header hop is honored only when the operator opts in."""
+    if os.environ.get('TRUST_PROXY')=='true':
+        forwarded=request.headers.get('x-forwarded-for','')
+        if forwarded:return forwarded.split(',')[0].strip()
+    return request.client.host if request.client else 'unknown'
+
+def attachment(client,version):
+    slug=re.sub(r'[^A-Za-z0-9]+','-',client).strip('-')[:40] or 'Proposal'
+    return {'Content-Disposition':f'attachment; filename="TeamLogic-Proposal-{slug}-r{version}.zip"'}
 
 def authenticated(request:Request):
     token=request.cookies.get('tlit_session','')
@@ -59,7 +86,7 @@ def health():return {'status':'ok','version':APP_VERSION}
 @app.post('/api/login')
 def login(c:Credentials,request:Request,response:Response):
     if request.headers.get('x-tlit-request')!='1':raise HTTPException(403,'Request header required.')
-    ip=request.client.host
+    ip=client_ip(request)
     with connect() as db:
         attempt=db.execute('SELECT * FROM attempts WHERE ip=?',(ip,)).fetchone()
         if attempt and attempt['count']>=10 and time.time()-attempt['started']<900:
@@ -114,7 +141,7 @@ def check_version(db,pid,expected):
     row=db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone()
     if not row:raise HTTPException(404,'Proposal not found.')
     if expected is None:raise HTTPException(428,'Reload the proposal before changing it.')
-    if str(row['version'])!=expected:raise HTTPException(409,'This proposal changed in another session. Reload it before saving.')
+    if str(row['version'])!=expected.strip().strip('"'):raise HTTPException(409,'This proposal changed in another session. Reload it before saving.')
     return row
 
 @app.post('/api/proposals')
@@ -153,15 +180,21 @@ def read_revision(pid:str,rid:str,user=Depends(authenticated)):
 def restore(pid:str,rid:str,user=Depends(authenticated),if_match:str|None=Header(default=None)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');check_version(db,pid,if_match)
-        old=revision(db,pid,rid);p=Proposal(**decode_revision(old)['proposal']);q=pricing(p,user)
+        old=revision(db,pid,rid)
+        try:snapshot=decode_revision(old)
+        except ValueError as e:raise HTTPException(500,str(e))
+        try:p=Proposal(**snapshot['proposal'])
+        except ValidationError as e:
+            raise HTTPException(422,'This revision was saved with an older data layout and cannot be restored automatically: '+'; '.join(f"{'.'.join(map(str,x['loc']))}: {x['msg']}" for x in e.errors()))
+        q=pricing(p,user)
         return append_revision(db,pid,p.model_dump(mode='json'),user,'restore',restored_from=old['version'],quote=q)
 
 @app.get('/api/exports/{eid}')
 def download_export(eid:str,user=Depends(authenticated)):
-    with connect() as db:row=db.execute('SELECT payload,sha256 FROM exports WHERE id=?',(eid,)).fetchone()
+    with connect() as db:row=db.execute('SELECT e.payload,e.sha256,p.client,r.version FROM exports e JOIN revisions r ON r.id=e.revision_id JOIN proposals p ON p.id=r.proposal_id WHERE e.id=?',(eid,)).fetchone()
     if not row:raise HTTPException(404,'Export not found.')
     if hashlib.sha256(row['payload']).hexdigest()!=row['sha256']:raise HTTPException(500,'Export integrity check failed.')
-    return Response(row['payload'],media_type='application/zip',headers={'Content-Disposition':'attachment; filename="TeamLogic-Proposal.zip"'})
+    return Response(row['payload'],media_type='application/zip',headers=attachment(row['client'],row['version']))
 
 class Confirmation(BaseModel):
     confirmation:str
@@ -222,7 +255,7 @@ def generate(p:Proposal,response:Response,user=Depends(authenticated),proposal_i
             z.writestr('generation-manifest.json',json.dumps({'app_version':APP_VERSION,'template_version':VERSION,'generated_by':user,'generated_at':stamp(),**saved,'warnings':q['warnings'],'monthly':str(q['monthly'])},indent=2))
         raw=output.getvalue()
         db.execute('INSERT INTO exports VALUES(?,?,?,?,?,?,?,?)',(str(uuid4()),saved['revision_id'],stamp(),user,VERSION,APP_VERSION,raw,hashlib.sha256(raw).hexdigest()))
-    return Response(raw,media_type='application/zip',headers={'Content-Disposition':'attachment; filename="TeamLogic-Proposal.zip"','X-Proposal-Id':proposal_id,'X-Proposal-Version':str(saved['version'])})
+    return Response(raw,media_type='application/zip',headers={**attachment(p.client,saved['version']),'X-Proposal-Id':proposal_id,'X-Proposal-Version':str(saved['version'])})
 
 app.mount('/static',StaticFiles(directory=Path(__file__).parent/'static'),name='static')
 @app.get('/')

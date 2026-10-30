@@ -1,19 +1,7 @@
-// Loaded after app.js; shares the active proposal state.
-document.querySelector('main').insertAdjacentHTML('beforeend',`
-<section id="history"><div class="section-title"><span>07</span><div><h2>Version history</h2><p>Every save and export is retained until you choose to delete it.</p></div></div>
-<p class="muted">History older than one year is compressed automatically. Restore creates a new revision; previous versions stay available.</p>
-<button id="reloadCurrent" class="secondary">Reload current revision</button>
-<div id="historyRows">Save a proposal to start its history.</div>
-<button id="deleteProposal" class="danger" hidden>Delete this proposal and all history</button>
-<details><summary>Storage cleanup</summary><p>Preview and permanently delete history older than two years. Proposals with no activity for two years are removed entirely. Recent proposals and their recent revisions remain.</p>
-<button id="cleanupPreview" class="danger">Preview records older than two years</button></details>
-</section>
-<dialog id="historyDialog"><h2 id="historyDialogTitle"></h2><pre id="historyDetail"></pre><button id="closeHistory">Close</button></dialog>`);
-document.querySelector('nav').insertAdjacentHTML('beforeend','<a href="#history">07 &nbsp; Version history</a>');
-const releaseLabel=document.createElement('p');releaseLabel.className='summary-note';document.querySelector('.aside-bottom').after(releaseLabel);
-fetch('/api/health').then(r=>r.json()).then(x=>{releaseLabel.textContent='Proposal Studio v'+x.version;});
+// Loaded after app.js; shares the active proposal state. Markup lives in index.html (#history panel).
+fetch('/api/health').then(r=>r.json()).then(x=>{$('#release').textContent='Proposal Studio v'+x.version;}).catch(()=>{});
 $('#closeHistory').onclick=()=>$('#historyDialog').close();
-$('#reloadCurrent').onclick=async()=>{if(currentId&&canReplace())try{await loadProposal(currentId);message('Current revision loaded.');}catch(e){message(e.message,true);}};
+$('#reloadCurrent').onclick=async()=>{if(currentId&&canReplace())try{await loadProposal(currentId);showHistory();message('Current revision loaded.');}catch(e){message(e.message,true);}};
 async function refreshHistory(){
  const container=$('#historyRows');if(!container)return;
  $('#deleteProposal').hidden=!currentId;$('#reloadCurrent').disabled=!currentId;
@@ -27,10 +15,10 @@ async function refreshHistory(){
   const path='/api/proposals/'+pid+'/history/'+item.id;
   action('View snapshot',async()=>{const detail=await(await api(path)).json();$('#historyDialogTitle').textContent='Revision '+item.version;$('#historyDetail').textContent=JSON.stringify(detail,null,2);$('#historyDialog').showModal();});
   if(item.version!==currentVersion){
-   action('Restore as new revision',async()=>{if(!canReplace()||!confirm('Restore revision '+item.version+' as a new current revision? Existing history will remain.'))return;await api(path+'/restore','POST',undefined,currentVersion);await loadProposal(pid);await refreshList();message('Historical revision restored as a new revision.');});
+   action('Restore as new revision',async()=>{if(!canReplace()||!confirm('Restore revision '+item.version+' as a new current revision? Existing history will remain.'))return;await api(path+'/restore','POST',undefined,currentVersion);await loadProposal(pid);showHistory();await refreshList();message('Historical revision restored as a new revision.');});
    action('Delete revision',async()=>{if(prompt('Permanently delete revision '+item.version+' and its exported files? Type DELETE to confirm.')!=='DELETE')return;await api(path,'DELETE',{confirmation:'DELETE'},currentVersion);await refreshHistory();message('Revision and its exports deleted.');},true);
   }
-  for(const exported of item.exports)action('Download saved export',async()=>downloadBlob(await(await api('/api/exports/'+exported.id)).blob()));
+  for(const exported of item.exports)action('Download saved export',async()=>{const r=await api('/api/exports/'+exported.id);downloadBlob(await r.blob(),filenameFrom(r));});
   container.append(row);
  }
 }
@@ -38,7 +26,7 @@ $('#deleteProposal').onclick=async()=>{
  if(writing||!currentId||prompt('Permanently delete this entire proposal, every revision and every saved export? Type DELETE to confirm.')!=='DELETE')return;
  try{await api('/api/proposals/'+currentId,'DELETE',{confirmation:'DELETE'},currentVersion);resetDeleted();await refreshList();message('Proposal and all history deleted.');}catch(e){message(e.message,true);}
 };
-function resetDeleted(){currentId=null;currentVersion=null;fill({proposal_date:today()});$('#draftState').textContent='New proposal · not saved';refreshHistory();}
+function resetDeleted(){currentId=null;currentVersion=null;fill({proposal_date:today()});$('#draftState').textContent='New proposal · not saved';refreshHistory();startWizard();}
 $('#cleanupPreview').onclick=async()=>{
  if(writing)return;
  try{
