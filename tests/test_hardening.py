@@ -67,7 +67,13 @@ def test_restore_of_legacy_layout_is_a_clean_422(client):
     assert r.status_code==422 and 'retired_field' in r.json()['detail']
     assert client.get('/api/proposals/'+pid+'/history').json()[0]['version']==2
 
-def test_purge_expired_sessions_and_attempts(client):
+@pytest.fixture
+def bare_db(tmp_path,monkeypatch):
+    # No TestClient: the app lifespan's maintenance task also calls purge_expired() and would race this test.
+    monkeypatch.setattr(storage,'DB',tmp_path/'purge.sqlite3')
+    storage.initialize()
+
+def test_purge_expired_sessions_and_attempts(bare_db):
     with storage.connect() as db:
         db.execute('INSERT INTO sessions VALUES(?,?,?)',('old','h-user',time.time()-1))
         db.execute('INSERT INTO sessions VALUES(?,?,?)',('live','h-user',time.time()+3600))
