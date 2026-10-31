@@ -1,6 +1,7 @@
 """One-time extraction of templates from the supplied, completed reference proposal.
 
-The originals are never modified. Both templates keep the original design and formatting;
+The originals are never modified. Also writes templates/reference/Example_IT_Proposal.pptx: a copy of
+the reference deck with the client's details replaced by the fictional values in templates/example.json. Both templates keep the original design and formatting;
 only client-specific values are swapped for {{tokens}} that app/generate.py fills in.
 Run outside the production image (needs python-docx and python-pptx):
 
@@ -22,7 +23,7 @@ from pptx import Presentation
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
-from app.textfill import paragraphs, replace, replace_all, replace_regex, text  # noqa: E402
+from app.textfill import fill_lines, paragraphs, replace, replace_all, replace_regex, text  # noqa: E402
 
 out = root / 'templates'
 DATE = r'\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{4}'
@@ -89,6 +90,39 @@ def prepare_presentation(path, client, month):
                 raise SystemExit(f'Slide {index + 1} still contains a priced value ({pattern}).')
 
 
+def write_reference(path, client, month):
+    """A copy of the completed reference deck with the client's details replaced by the fictional
+    values in templates/example.json. Generating from example.json must reproduce slides 1-14 of it."""
+    example = json.loads((out / 'example.json').read_text(encoding='utf-8'))
+    prs = Presentation(path)
+    for index, slide in enumerate(prs.slides):
+        if slide.has_notes_slide:
+            slide.notes_slide.notes_text_frame.text = ''
+        by_id = {s.shape_id: s for s in all_shapes(slide.shapes)}
+        if index == 10:  # Current-state bullets.
+            paras = by_id[8].text_frame.paragraphs
+            bullets = [p for p in paras if p.text.strip()]
+            for p in bullets[1:]:
+                p._p.getparent().remove(p._p)
+            lines = [line for line in example['current_state'].splitlines() if line.strip()]
+            fill_lines(bullets[0]._p, bullets[0].text, lines)
+        if index == 11:  # Backup card label (the client's cloud provider).
+            set_shape_value(by_id[31], SLIDE_VALUES[11][31][0], example.get('backup_label', 'Cloud'))
+        for shape in list(all_shapes(slide.shapes)):
+            if shape.has_text_frame:
+                for p in paragraphs(shape._element):
+                    replace(p, client, example['client'])
+                if re.fullmatch(r'\s*\d+\s*/\s*\d+\s*', shape.text_frame.text):
+                    shape._element.getparent().remove(shape._element)
+    props = prs.core_properties
+    props.title = f'TeamLogic IT — Managed Services Proposal — {example["client"]}'
+    props.author = props.last_modified_by = 'TeamLogic IT Scottsdale'
+    props.subject = props.comments = props.keywords = ''
+    target = out / 'reference' / 'Example_IT_Proposal.pptx'
+    target.parent.mkdir(exist_ok=True)
+    prs.save(target)
+
+
 def cell_paragraphs(table, row, col):
     return table.cell(row, col).paragraphs
 
@@ -141,7 +175,7 @@ def prepare_document(path, client):
 
 
 def check_no_client_data(markers):
-    for name in ['proposal.pptx', 'agreement.docx']:
+    for name in ['proposal.pptx', 'agreement.docx', 'reference/Example_IT_Proposal.pptx']:
         with zipfile.ZipFile(out / name) as z:
             for part in z.namelist():
                 data = z.read(part)
@@ -162,5 +196,6 @@ if __name__ == '__main__':
     out.mkdir(exist_ok=True)
     prepare_presentation(args.presentation, args.client_name, args.proposal_month)
     prepare_document(args.document, args.client_name)
+    write_reference(args.presentation, args.client_name, args.proposal_month)
     check_no_client_data([args.client_name] + args.private_marker)
     print('Templates written to', out)

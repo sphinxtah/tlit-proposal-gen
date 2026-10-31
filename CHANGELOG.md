@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.0 — Itemised pricing and inventory recap
+
+- The Pricing step mirrors the pricing slide: one box per card (Managed Services, Cybersecurity, Backup, one-time setup, hourly rates) with a live preview of the exact line each card shows. Free-form extra charges and the monthly discount are gone, so every figure on the slide comes from the wizard.
+- Drafts saved by earlier versions are upgraded when opened: cybersecurity and backup charges move into their cards; anything else appears in an "older draft" box with a warning.
+- New Inventory Recap slide at the end of the deck: count tiles and an equipment table built from the deck's own card and tile styles, continued on extra slides for long inventories.
+- `templates/reference/Example_IT_Proposal.pptx`: the completed reference deck with personal information removed. A test checks that the example data reproduces it exactly.
+
 ## v0.3.0 — Reference-faithful documents
 
 - Proposal slides 11–13 (Current State, Pricing, Hourly Rates) are now the original reference slides with client values filled in, instead of generated text slides. Generated decks match the reference deck exactly for the ProjectCenter data.

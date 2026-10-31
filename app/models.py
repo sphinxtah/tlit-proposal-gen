@@ -1,7 +1,8 @@
+import re
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Money = Annotated[Decimal, Field(ge=0, le=1000000, max_digits=12, decimal_places=2)]
 Count = Annotated[int, Field(ge=0, le=100000)]
@@ -32,7 +33,45 @@ class Service(Model):
     frequency: Annotated[str, Field(max_length=80)] = 'Ongoing'
     status: Literal['Included', 'Excluded', 'Not applicable'] = 'Included'
 
+CARD_FIELDS = ('quantity', 'unit', 'rate', 'taxable')
+
+
+def guess_card(line):
+    if line.get('category') in ('security', 'backup'):
+        return line['category']
+    if line.get('category') == 'other':
+        return 'other'
+    description = line.get('description') or ''
+    if re.search(r'backup', description, re.I):
+        return 'backup'
+    if re.search(r'secur|protect|mdr|\bsoc\b|endpoint', description, re.I):
+        return 'security'
+    return 'other'
+
+
 class Proposal(Model):
+    @model_validator(mode='before')
+    @classmethod
+    def move_card_charges(cls, data):
+        """Drafts saved before v0.4 kept cybersecurity and backup as free-form extra charges.
+        Move the first monthly charge of each kind into its pricing-slide card."""
+        if not isinstance(data, dict) or not data.get('extras'):
+            return data
+        if any(f'{card}_{f}' in data for card in ('security', 'backup') for f in CARD_FIELDS):
+            return data
+        data, remaining = dict(data), []
+        for line in data['extras']:
+            card = guess_card(line) if isinstance(line, dict) and line.get('cadence', 'monthly') == 'monthly' else 'other'
+            if card in ('security', 'backup') and f'{card}_quantity' not in data:
+                data[f'{card}_quantity'] = line.get('quantity', 1)
+                data[f'{card}_rate'] = line.get('rate', '0')
+                data[f'{card}_unit'] = line.get('unit', 'users')
+                data[f'{card}_taxable'] = line.get('taxable', False)
+            else:
+                remaining.append(line)
+        data['extras'] = remaining
+        return data
+
     client: Annotated[str, Field(min_length=1, max_length=100)]
     contact: Annotated[str, Field(max_length=120)] = ''
     email: Annotated[str, Field(max_length=160)] = ''
@@ -56,6 +95,15 @@ class Proposal(Model):
     workstation_taxable: bool = False
     server_taxable: bool = False
     onboarding_taxable: bool = False
+    # Pricing-slide cards, one itemised figure each: "2 users × $25.00".
+    security_quantity: Count = 0
+    security_unit: Short = 'users'
+    security_rate: Money = Decimal('0')
+    security_taxable: bool = False
+    backup_quantity: Count = 0
+    backup_unit: Short = 'users'
+    backup_rate: Money = Decimal('0')
+    backup_taxable: bool = False
     tax_reviewed: bool = False
     tax_notes: Text = ''
     discount: Money = Decimal('0')
@@ -90,8 +138,13 @@ def quote(p: Proposal):
                              ('Server monitoring & support', p.servers, p.server_rate,p.server_taxable,p.billing_mode!='users','Devices')]:
         if qty and enabled:
             lines.append(dict(description=name, quantity=qty, rate=rate, taxable=taxable, cadence='monthly', category='core', unit=unit, total=cents(qty*rate)))
-    for x in p.extras:
-        lines.append(dict(**x.model_dump(), total=cents(x.quantity*x.rate)))
+    for card, description in [('security', 'Cybersecurity protection'), ('backup', f'{p.backup_label} backup')]:
+        qty, rate = getattr(p, f'{card}_quantity'), getattr(p, f'{card}_rate')
+        if qty:
+            lines.append(dict(description=description, quantity=qty, rate=rate, taxable=getattr(p, f'{card}_taxable'),
+                              cadence='monthly', category=card, unit=getattr(p, f'{card}_unit'), total=cents(qty*rate)))
+    for x in p.extras:  # Only drafts from older versions still carry these.
+        lines.append(dict(**{**x.model_dump(), 'category': 'other'}, total=cents(x.quantity*x.rate)))
     if p.onboarding:
         lines.append(dict(description='Onboarding / setup', quantity=1, rate=p.onboarding, taxable=p.onboarding_taxable, cadence='one-time', category='onboarding', unit='', total=p.onboarding))
     subtotal = sum((x['total'] for x in lines if x['cadence']=='monthly'), Decimal('0'))
@@ -118,9 +171,9 @@ def quote(p: Proposal):
         if actual != count: warnings.append(f'{label} inventory ({actual}) differs from billed quantity ({count}).')
     # The proposal deck reproduces the reference pricing slide, which only has cards for managed services,
     # cybersecurity, backup and onboarding. Flag anything the client would not see itemised there.
-    hidden=[x['description'] for x in lines if x['category'] not in ('core','onboarding') and (x['category']=='other' or x['cadence']!='monthly')]
-    if hidden: warnings.append('Not itemised on the pricing slide (included in its totals only): '+', '.join(hidden)+'. Assign monthly charges to the Cybersecurity or Backup card where they belong.')
-    if p.discount: warnings.append('The pricing slide cards show undiscounted amounts; the headline monthly figure and SOW Monthly Fee include the discount.')
+    legacy=[x.description for x in p.extras]
+    if legacy: warnings.append('Charges carried over from an older draft are not itemised on the pricing slide: '+', '.join(legacy)+'. Enter them in the Cybersecurity or Backup card, then remove them.')
+    if p.discount: warnings.append('This older draft has a monthly discount, which the pricing slide cannot show. Enter discounted rates instead and set the discount to 0.')
     if tax or setup_tax: warnings.append('The pricing slide and SOW show fees before tax. Applicable tax is invoiced separately.')
     return dict(lines=lines, subtotal=cents(subtotal), discount=p.discount, net=cents(net), tax=tax,
                 monthly=cents(net+tax), one_time=cents(setup+setup_tax), one_time_tax=setup_tax,

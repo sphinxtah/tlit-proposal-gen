@@ -10,41 +10,31 @@
   "users": 2,
   "workstations": 3,
   "servers": 1,
-  "user_rate": "0",
+  "networks": 1,
   "workstation_rate": "80",
   "server_rate": "80",
-  "onboarding": "500",
+  "billing_mode": "devices",
+  "security_quantity": 2,
+  "security_rate": "25",
+  "backup_quantity": 2,
+  "backup_rate": "20",
+  "current_state": "4 desktops/laptops\nUnresponsive remote IT provider",
+  "backup_label": "Cloud",
   "cloud": "Example cloud environment - replace with discovery findings.",
-  "needs": "Fictional example: improve support responsiveness.",
   "backups": "Example cloud backup for two users.",
+  "needs": "Fictional example: improve support responsiveness.",
   "assets": [
     {
       "kind": "Workstation",
       "description": "Desktops / laptops",
-      "quantity": 3
+      "quantity": 3,
+      "location": ""
     },
     {
       "kind": "Physical server",
       "description": "Server - confirm type and location",
-      "quantity": 1
-    }
-  ],
-  "extras": [
-    {
-      "description": "Cybersecurity protection",
-      "quantity": 2,
-      "rate": "25",
-      "cadence": "monthly",
-      "category": "security",
-      "unit": "users"
-    },
-    {
-      "description": "Cloud-to-cloud backup",
-      "quantity": 2,
-      "rate": "20",
-      "cadence": "monthly",
-      "category": "backup",
-      "unit": "users"
+      "quantity": 1,
+      "location": ""
     }
   ],
   "services": [
@@ -209,11 +199,5 @@
       "status": "Included"
     }
   ],
-  "unresolved": "Fictional demonstration only. Confirm all quantities, rates, scope and tax treatment for each client.",
-  "billing_mode": "devices",
-  "term_months": 36,
-  "current_state": "4 desktops/laptops\nUnresponsive remote IT provider",
-  "backup_label": "Cloud",
-  "networks": 1,
-  "mobile_devices": 0
+  "unresolved": "Fictional demonstration only. Confirm all quantities, rates, scope and tax treatment for each client."
 }

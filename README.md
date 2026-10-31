@@ -1,4 +1,4 @@
-# TeamLogic IT Proposal Studio v0.3.0
+# TeamLogic IT Proposal Studio v0.4.0
 
 Internal intake, pricing, editable PowerPoint proposals and Word (DOCX) managed services agreements. Both documents reproduce the completed ProjectCenter reference proposal exactly (design, layout, formatting); only client-specific values change. Runs without Microsoft Office in production.
 
@@ -13,12 +13,15 @@ The template extraction helper (`scripts/prepare_templates.py`) builds `template
 | Output | Source in the wizard |
 |---|---|
 | Slide 11 "Current State" bullets | Discovery → Current state (one per line; blank lists workstation/server counts) |
-| Slide 12 headline, Core Support card | Net monthly before tax; user/workstation/server lines |
-| Slide 12 Cybersecurity / Backup cards | Additional line items with Card = Cybersecurity / Backup (a card with no charges is removed); Backup card label |
+| Slide 12 headline, Core Support card | Sum of the cards (before tax); user/workstation/server rates |
+| Slide 12 Cybersecurity / Backup cards | Pricing step Cybersecurity and Backup boxes: quantity, unit, rate, provider label (a card with quantity 0 is removed) |
 | Slide 12 one-time setup, slide 13 hourly rates | Onboarding fee; onsite and after-hours rates |
+| Slide 15+ Inventory Recap | Counts from step 2 as tiles; equipment from step 4 as a table (continued on further slides past six rows) |
 | SOW cover, Schedule B, Schedule C | Client details, dates, term, fees; service scope (rows not in scope are removed, custom services added under "Additional Services"); hourly rates and covered equipment counts |
 
-Charges with Card = Other, one-time extras, discounts and tax are included in totals but not itemised on slide 12; the Review step warns when that happens. Discovery notes, inventory, exclusions and tax notes are kept with the proposal (and in `proposal-data.json`) but do not appear in either document, because the reference proposal has no place for them.
+The Pricing step asks for exactly the figures slide 12 shows, with a live preview of each card's line, so every amount is itemised. Fees are quoted before tax; tax is invoiced separately. Drafts from earlier versions have their cybersecurity and backup charges moved into the cards automatically; anything else (free-form charges, a discount) is shown in an "older draft" box with a warning until it is moved or removed. Discovery notes, exclusions and tax notes are kept with the proposal (and in `proposal-data.json`) but do not appear in either document.
+
+`templates/reference/Example_IT_Proposal.pptx` is a copy of the completed ProjectCenter deck with the client's details replaced by the fictional values in `templates/example.json` (written by the prep script). A test requires slides 1–14 generated from `example.json` to match it shape for shape.
 
 ## Local start
 

@@ -47,19 +47,48 @@
 <div id="inventoryCheck" class="notice"></div>
 <div id="assets"></div><button type="button" id="addAsset" class="secondary">＋ Add equipment</button></section>
 
-<section class="step" data-step="5" id="pricing"><div class="section-title"><span>05</span><div><h2>What will it cost?</h2><p>One calculation, shared by the proposal and services agreement. Only the rates for your billing model are shown.</p></div></div><div class="grid">
-<label data-billing="users">Managed services / user / month<input name="user_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="user_taxable" type="checkbox"> Taxable</span></label>
-<label data-billing="devices">Monitoring & support / workstation / month<input name="workstation_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="workstation_taxable" type="checkbox"> Taxable</span></label>
-<label data-billing="devices">Monitoring & support / server / month<input name="server_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="server_taxable" type="checkbox"> Taxable</span></label>
-<label>Flat onboarding fee<input name="onboarding" type="number" min="0" step="0.01" value="500" inputmode="decimal"><span><input name="onboarding_taxable" type="checkbox"> Taxable</span></label>
-<label>Monthly discount ($)<input name="discount" type="number" min="0" step="0.01" value="0" inputmode="decimal"></label>
+<section class="step" data-step="5" id="pricing"><div class="section-title"><span>05</span><div><h2>What will it cost?</h2><p>Each box below is a card on the pricing slide. Enter one figure per card; the preview shows exactly what the slide will say.</p></div></div>
+<datalist id="units"><option value="users"><option value="devices"><option value="mailboxes"><option value="endpoints"></datalist>
+
+<fieldset class="card-figs core"><legend><span>CORE SUPPORT</span>Managed Services</legend><div class="grid">
+<label data-billing="users">Managed services per user / month<input name="user_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="user_taxable" type="checkbox"> Taxable</span></label>
+<label data-billing="devices">Per workstation / month<input name="workstation_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="workstation_taxable" type="checkbox"> Taxable</span></label>
+<label data-billing="devices">Per server / month<input name="server_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"><span><input name="server_taxable" type="checkbox"> Taxable</span><small class="hint">Use the workstation rate to show a single “Devices ×” line, as in the reference.</small></label>
+</div><output class="card-preview" data-preview="core"></output></fieldset>
+
+<fieldset class="card-figs protection"><legend><span>PROTECTION</span>Cybersecurity</legend><div class="grid four">
+<label>Quantity<input name="security_quantity" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"></label>
+<label>Unit<input name="security_unit" list="units" maxlength="40" value="users"></label>
+<label>Rate per unit / month<input name="security_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"></label>
+<label class="check-cell"><span><input name="security_taxable" type="checkbox"> Taxable</span></label>
+</div><output class="card-preview" data-preview="security"></output></fieldset>
+
+<fieldset class="card-figs backup"><legend><span>BACKUP</span>Backup</legend><div class="grid four">
+<label class="span2">Provider label (small text above “Backup”)<input name="backup_label" maxlength="40" value="Cloud" placeholder="Google Cloud"></label>
+<label>Quantity<input name="backup_quantity" type="number" min="0" max="100000" step="1" value="0" inputmode="numeric"></label>
+<label>Unit<input name="backup_unit" list="units" maxlength="40" value="users"></label>
+<label>Rate per unit / month<input name="backup_rate" type="number" min="0" step="0.01" value="0" inputmode="decimal"></label>
+<label class="check-cell"><span><input name="backup_taxable" type="checkbox"> Taxable</span></label>
+</div><output class="card-preview" data-preview="backup"></output></fieldset>
+
+<div class="grid">
+<fieldset class="card-figs setup"><legend><span>ONE-TIME SETUP</span>Onboarding</legend>
+<label>Setup fee<input name="onboarding" type="number" min="0" step="0.01" value="500" inputmode="decimal"><span><input name="onboarding_taxable" type="checkbox"> Taxable</span></label>
+<output class="card-preview" data-preview="setup"></output></fieldset>
+<fieldset class="card-figs rates"><legend><span>HOURLY &amp; ONE-TIME</span>Service rates (slide 13)</legend><div class="grid">
+<label>Business hours ($/hour)<input name="hourly_rate" type="number" min="0" step="0.01" value="135" inputmode="decimal"></label>
+<label>After hours ($/hour)<input name="after_hours_rate" type="number" min="0" step="0.01" value="202" inputmode="decimal"></label>
+</div></fieldset>
+</div>
+<p class="muted">A card with quantity 0 is left off the slide. The headline monthly figure is the sum of the cards.</p>
+
+<div id="legacy" class="legacy" hidden><h3>From an older draft</h3><p class="muted">These were entered before the pricing slide cards existed and cannot be shown on the slide. Move them into the cards above, then remove them here.</p>
+<label class="discount">Monthly discount ($)<input name="discount" type="number" min="0" step="0.01" value="0" inputmode="decimal"></label><div id="extras"></div></div>
+
+<details><summary>Tax</summary>
+<div class="notice">Tax is not shown in the proposal or the SOW; fees are quoted before tax and tax is invoiced separately. Tax depends on the service, software licensing, and transaction location. Scottsdale lists 8.00% for most taxable activities; that is not automatically the correct rate for every client. See the tax research notes before applying a rate.</div>
 <label>Tax rate on taxable items (%)<input name="tax_percent" type="number" min="0" max="100" step="0.001" value="0" inputmode="decimal"></label>
-<label>Onsite / project rate ($/hour)<input name="hourly_rate" type="number" min="0" step="0.01" value="135" inputmode="decimal"></label>
-<label>After-hours rate ($/hour)<input name="after_hours_rate" type="number" min="0" step="0.01" value="202" inputmode="decimal"></label></div>
-<details open><summary>Additional line items</summary><p class="muted">Charges such as cybersecurity or cloud backup. <strong>Card</strong> chooses which box shows the charge on the pricing slide; <strong>Unit</strong> is the word in “2 users × $25.00”. Charges marked Other are included in the totals but not itemised on the slide.</p>
-<label class="backup-label">Backup card label (shown above “Backup”)<input name="backup_label" maxlength="40" value="Cloud" placeholder="Google Cloud"></label><div id="extras"></div><button type="button" id="addExtra" class="secondary">＋ Add charge</button></details>
-<div class="notice">Tax depends on the service, software licensing, and transaction location. Scottsdale lists 8.00% for most taxable activities; that is not automatically the correct rate for every client. See the tax research notes before applying a rate.</div>
-<label>Tax classification / sourcing notes<textarea name="tax_notes" maxlength="2000" rows="2"></textarea></label><label class="check"><input type="checkbox" name="tax_reviewed"> Tax classification and sourcing reviewed</label></section>
+<label>Tax classification / sourcing notes<textarea name="tax_notes" maxlength="2000" rows="2"></textarea></label><label class="check"><input type="checkbox" name="tax_reviewed"> Tax classification and sourcing reviewed</label></details></section>
 
 <section class="step" data-step="6" id="scope"><div class="section-title"><span>06</span><div><h2>Which services are covered?</h2><p>Explicit coverage for Schedule B. Start from the reference scope, then adjust per client.</p></div></div>
 <button type="button" id="loadScope" class="secondary">Load reference scope</button><div id="services"></div><button type="button" id="addService" class="secondary">＋ Add service</button>

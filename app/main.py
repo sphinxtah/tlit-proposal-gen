@@ -73,6 +73,12 @@ def attachment(client,version):
     slug=re.sub(r'[^A-Za-z0-9]+','-',client).strip('-')[:40] or 'Proposal'
     return {'Content-Disposition':f'attachment; filename="TeamLogic-Proposal-{slug}-r{version}.zip"'}
 
+def current_layout(data):
+    """Upgrade drafts saved by older versions (e.g. card charges kept as extra line items) for the wizard.
+    Anything the current model rejects is returned unchanged so it can still be opened and fixed."""
+    try:return Proposal(**data).model_dump(mode='json')
+    except ValidationError:return data
+
 def authenticated(request:Request):
     token=request.cookies.get('tlit_session','')
     with connect() as db:
@@ -122,7 +128,7 @@ def me(user=Depends(authenticated)):return {'username':user}
 @app.get('/api/example')
 def example(user=Depends(authenticated)):
     local=TEMPLATES/'example.private.json'
-    return json.loads((local if local.exists() else TEMPLATES/'example.json').read_text(encoding='utf-8'))
+    return current_layout(json.loads((local if local.exists() else TEMPLATES/'example.json').read_text(encoding='utf-8')))
 
 @app.get('/api/services')
 def services(user=Depends(authenticated)):return json.loads((TEMPLATES/'services.json').read_text(encoding='utf-8'))
@@ -141,7 +147,7 @@ def read(pid:str,response:Response,user=Depends(authenticated)):
     with connect() as db:r=db.execute('SELECT payload,version FROM proposals WHERE id=?',(pid,)).fetchone()
     if not r:raise HTTPException(404,'Proposal not found.')
     response.headers['ETag']=str(r['version'])
-    return json.loads(r['payload'])
+    return current_layout(json.loads(r['payload']))
 
 def check_version(db,pid,expected):
     row=db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone()

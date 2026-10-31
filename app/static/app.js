@@ -1,8 +1,8 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)], form=$('#proposalForm');
 let currentId=null, currentVersion=null, timer, quoteSequence=0, writing=false, lastQuote=null;
 const currency=v=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(v);
-const numeric=new Set(['users','workstations','servers','networks','mobile_devices','term_months','renewal_months','notice_days']);
-const moneyFields=new Set(['user_rate','workstation_rate','server_rate','onboarding','discount','tax_percent','hourly_rate','after_hours_rate']);
+const numeric=new Set(['users','workstations','servers','networks','mobile_devices','security_quantity','backup_quantity','term_months','renewal_months','notice_days']);
+const moneyFields=new Set(['user_rate','workstation_rate','server_rate','security_rate','backup_rate','onboarding','discount','tax_percent','hourly_rate','after_hours_rate']);
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Phoenix',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const BILLING={combined:'Per user + per device',users:'Per user only',devices:'Per workstation / server only'};
@@ -35,8 +35,6 @@ for(const [key,label,placeholder] of DISCOVERY){
 }
 
 // ---------- Dynamic rows ----------
-const CARDS=[['security','Cybersecurity'],['backup','Backup'],['other','Other']];
-const guessCard=d=>/backup/i.test(d||'')?'backup':/secur|protect|mdr|soc\b|endpoint/i.test(d||'')?'security':'other';
 function field(label,key,value,type='text',options=null,max=200){
  let control=options?`<select data-key="${key}">${options.map(o=>{const [v,t]=Array.isArray(o)?o:[o,o];return `<option value="${escapeHtml(v)}" ${value===v?'selected':''}>${escapeHtml(t)}</option>`;}).join('')}</select>`:`<input data-key="${key}" type="${type}" ${type==='checkbox'?(value?'checked':''):`value="${escapeHtml(value)}"`} ${type==='number'?'min="0" max="'+(key==='quantity'?'100000':'1000000')+'" step="'+(key==='quantity'?'1':'0.01')+'"':`maxlength="${max}"`}>`;
  return `<label>${label}${control}</label>`;
@@ -44,14 +42,13 @@ function field(label,key,value,type='text',options=null,max=200){
 function addRow(kind,data={}){
  const row=document.createElement('div');row.className='dynamic-row '+(kind==='services'?'service-row':kind==='extras'?'extra-row':'');
  if(kind==='assets')row.innerHTML=field('Type','kind',data.kind||'Workstation','text',['Workstation','Physical server','Cloud server','Firewall','Switch','Access point','Other'])+field('Description','description',data.description||'')+field('Qty','quantity',data.quantity??1,'number')+field('Location / cloud','location',data.location||'');
- if(kind==='extras')row.innerHTML=field('Charge','description',data.description||'','text',null,150)+field('Qty','quantity',data.quantity??1,'number')+field('Unit','unit',data.unit??'users','text',null,40)+field('Unit rate','rate',data.rate??0,'number')+field('Cadence','cadence',data.cadence||'monthly','text',['monthly','one-time'])+field('Card','category',data.category??guessCard(data.description),'text',CARDS)+field('Taxable','taxable',data.taxable||false,'checkbox');
+ if(kind==='extras')row.innerHTML=field('Charge','description',data.description||'','text',null,150)+field('Qty','quantity',data.quantity??1,'number')+field('Unit','unit',data.unit??'users','text',null,40)+field('Unit rate','rate',data.rate??0,'number')+field('Cadence','cadence',data.cadence||'monthly','text',['monthly','one-time'])+field('Taxable','taxable',data.taxable||false,'checkbox');
  if(kind==='services')row.innerHTML=field('Service','description',data.description||'','text',null,350)+field('Frequency','frequency',data.frequency||'Ongoing','text',null,80)+field('Coverage','status',data.status||'Included','text',['Included','Excluded','Not applicable']);
  row.querySelectorAll('input[data-key=description]').forEach(el=>el.required=true);
- const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove row');remove.onclick=()=>{row.remove();dirty();scheduleQuote();};row.append(remove);$('#'+kind).append(row);
+ const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove row');remove.onclick=()=>{row.remove();dirty();scheduleQuote();showLegacy();};row.append(remove);$('#'+kind).append(row);
  return row;
 }
 $('#addAsset').onclick=()=>{addRow('assets').querySelector('input[data-key=description]').focus();dirty();};
-$('#addExtra').onclick=()=>{addRow('extras').querySelector('input[data-key=description]').focus();dirty();};
 $('#addService').onclick=()=>{addRow('services').querySelector('input[data-key=description]').focus();dirty();};
 
 // ---------- Form <-> JSON ----------
@@ -75,12 +72,32 @@ function fill(data){
   else el.value=data[el.name]??'';
  }
  for(const kind of ['assets','extras','services']){$('#'+kind).replaceChildren();(data[kind]||[]).forEach(x=>addRow(kind,x));}
- applyBilling();scheduleQuote();
+ applyBilling();showLegacy();updatePreviews();scheduleQuote();
+}
+// Older drafts may carry free-form charges or a discount, which the pricing slide cannot show.
+function showLegacy(){$('#legacy').hidden=!$('#extras').children.length&&!(Number(form.elements.discount.value)>0);}
+// Live preview of the line each pricing-slide card will show ("2 users × $25.00").
+function updatePreviews(){
+ const d=collect(),n=v=>Number(v)||0,line=(q,u,r)=>`${q} ${u} × ${currency(n(r))}`;
+ const core=[];
+ if(d.billing_mode!=='devices'&&d.users)core.push([d.users,'Users',d.user_rate]);
+ if(d.billing_mode!=='users'){
+  if(n(d.workstation_rate)===n(d.server_rate)){const c=d.workstations+d.servers;if(c)core.push([c,'Devices',d.workstation_rate]);}
+  else{if(d.workstations)core.push([d.workstations,'Devices',d.workstation_rate]);if(d.servers)core.push([d.servers,'Devices',d.server_rate]);}
+ }
+ const coreTotal=core.reduce((s,[q,,r])=>s+q*n(r),0);
+ $('[data-preview=core]').textContent=core.length?`Slide: ${core.map(c=>line(...c)).join(' + ')} = ${currency(coreTotal)}/mo`:'Slide: no billed users or devices yet (set counts in step 2).';
+ for(const card of ['security','backup']){
+  const q=d[card+'_quantity'],r=d[card+'_rate'];
+  $(`[data-preview=${card}]`).textContent=q?`Slide: ${line(q,d[card+'_unit']||'users',r)} = ${currency(q*n(r))}/mo${card==='backup'?` · label “${d.backup_label}”`:''}`:'Not on the slide (quantity 0).';
+ }
+ const whole=v=>Number.isInteger(v)?'$'+v.toLocaleString('en-US'):currency(v);
+ $('[data-preview=setup]').textContent=`Slide: ${whole(n(d.onboarding))} one-time setup`;
 }
 function dirty(){$('#draftState').textContent=(currentId?'Saved proposal':'New proposal')+' · unsaved changes';$('#exportState').textContent='';}
 const isDirty=()=>$('#draftState').textContent.includes('unsaved changes');
-form.addEventListener('input',e=>{dirty();scheduleQuote();if(e.target.name==='billing_mode')applyBilling();refreshStepStates();});
-form.addEventListener('change',e=>{scheduleQuote();if(e.target.name==='billing_mode')applyBilling();});
+form.addEventListener('input',e=>{dirty();scheduleQuote();updatePreviews();if(e.target.name==='discount')showLegacy();if(e.target.name==='billing_mode')applyBilling();refreshStepStates();});
+form.addEventListener('change',e=>{scheduleQuote();updatePreviews();if(e.target.name==='billing_mode')applyBilling();});
 form.onsubmit=e=>e.preventDefault();
 form.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.tagName==='INPUT'&&e.target.type!=='checkbox'&&e.target.type!=='radio'){e.preventDefault();if(step<STEPS.length)next();}});
 
@@ -167,7 +184,7 @@ async function updateQuote(){
  const seq=++quoteSequence,data=collect();$('#summaryClient').textContent=data.client||'New client';if(!data.client)data.client='New client';if(!data.proposal_date)data.proposal_date=today();
  try{const q=await(await api('/api/quote','POST',data)).json();if(seq!==quoteSequence)return;lastQuote=q;
   $('#monthly').textContent=currency(q.monthly);$('#once').textContent=currency(q.one_time);$('#first').textContent=currency(q.first_month);$('#term').textContent=currency(q.term_total);
-  $('#breakdown').innerHTML=q.lines.filter(x=>x.cadence==='monthly').map(x=>`<div class="sumrow"><span>${escapeHtml(x.description)}</span><strong>${currency(x.total)}</strong></div>`).join('')+`<div class="sumrow"><span>Discount</span><strong>−${currency(q.discount)}</strong></div><div class="sumrow"><span>Monthly tax</span><strong>${currency(q.tax)}</strong></div>`;
+  $('#breakdown').innerHTML=q.lines.filter(x=>x.cadence==='monthly').map(x=>`<div class="sumrow"><span>${escapeHtml(x.description)}</span><strong>${currency(x.total)}</strong></div>`).join('')+(Number(q.discount)?`<div class="sumrow"><span>Discount</span><strong>−${currency(q.discount)}</strong></div>`:'')+`<div class="sumrow"><span>Monthly tax</span><strong>${currency(q.tax)}</strong></div>`;
   $('#warnings').innerHTML=q.warnings.map(w=>`<div class="warning">${escapeHtml(w)}</div>`).join('');
   $('#summaryWarnings').textContent=q.warnings.length?`${q.warnings.length} review warning${q.warnings.length>1?'s':''} — see Review & export.`:'';
   if(step===STEPS.length&&!$('#wizard').hidden)renderRecap();

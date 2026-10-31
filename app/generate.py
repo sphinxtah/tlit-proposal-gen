@@ -12,8 +12,13 @@ from pathlib import Path
 
 from docx import Document
 from docx.table import _Row
+from lxml import etree
 from pptx import Presentation
-from pptx.util import Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+from pptx.oxml.ns import qn
+from pptx.util import Emu, Pt
 
 from app.textfill import fill_lines, paragraphs, replace, text
 
@@ -23,7 +28,7 @@ STATUS = {'Included': 'YES', 'Excluded': 'NO', 'Not applicable': 'NA'}
 # Shape ids on the pricing slide (slide 12) of the reference deck, for cards with nothing to show.
 SECURITY_CARD = [5]
 BACKUP_CARD = [9, 10, 15, 16, 17, 19, 6, 13, 31, 36]
-PRICING_SLIDE, CURRENT_STATE_SLIDE = 11, 10
+PRICING_SLIDE, CURRENT_STATE_SLIDE, RATES_SLIDE = 11, 10, 12
 
 
 def money(x):
@@ -146,6 +151,142 @@ def fit_heading(shape):
                 run.font._rPr.set('spc', str(int(int(spacing) * scale)))
 
 
+# ---------------------------------------------------------------------------
+# Inventory recap: an appendix slide assembled from copies of the deck's own elements
+# (logo, heading styles and card from slide 11, colour tiles from slide 13), so fonts,
+# colours and shadows match the reference slides exactly.
+# ---------------------------------------------------------------------------
+EMU_IN = 914400
+LEFT, WIDTH = 457200, 8229600
+TILE_TOP, TILE_H, TILE_GAP = 1280160, 1005840, 109728
+CARD_BOTTOM, CARD_HEADER, ROW_H, CARD_PAD = 4617720, 411480, 228600, 182880
+COLUMNS = [('TYPE', 1554480), ('DESCRIPTION', 3657600), ('LOCATION / CLOUD', 2011680), ('QTY', 640080)]
+SLATE, MUTED, BORDER, BAND = '334155', '64748B', 'E2E8F0', 'F8FAFC'
+
+
+def _clone(source_slide, shape_id, target):
+    """Copy a shape (and the image it shows) from a reference slide onto target."""
+    source = next(s for s in source_slide.shapes if s.shape_id == shape_id)
+    element = copy.deepcopy(source._element)
+    for blip in element.iter(qn('a:blip')):
+        image_part = source_slide.part.related_part(blip.get(qn('r:embed')))
+        blip.set(qn('r:embed'), target.part.relate_to(image_part, RT.IMAGE))
+    target.shapes._spTree.append(element)
+    shape = target.shapes[-1]
+    shape._element.xpath('./*[1]/p:cNvPr')[0].set('id', str(max(s.shape_id for s in target.shapes) + 1))
+    return shape
+
+
+def _place(shape, x, y, w, h):
+    shape.left, shape.top, shape.width, shape.height = int(x), int(y), int(w), int(h)
+    return shape
+
+
+def _set_text(shape, value):
+    paras = paragraphs(shape._element)
+    for extra in paras[1:]:
+        extra.getparent().remove(extra)
+    replace(paras[0], text(paras[0]), value)
+    return shape
+
+
+def _cell(cell, value, size, color, bold=False, spacing=None, fill=None, align=PP_ALIGN.LEFT):
+    cell.margin_left = cell.margin_right = Emu(64008)
+    cell.margin_top = cell.margin_bottom = Emu(0)
+    cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+    if fill:
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = RGBColor.from_string(fill)
+    else:
+        cell.fill.background()
+    para = cell.text_frame.paragraphs[0]
+    para.alignment = align
+    run = para.add_run()
+    run.text = value
+    run.font.name, run.font.size, run.font.bold = 'Calibri', Pt(size), bold
+    run.font.color.rgb = RGBColor.from_string(color)
+    if spacing:
+        run.font._rPr.set('spc', str(spacing))
+    # Hairline row divider, as on the reference cards.
+    tcPr = cell._tc.get_or_add_tcPr()
+    for edge in ('a:lnL', 'a:lnR', 'a:lnT', 'a:lnB'):
+        line = tcPr.find(qn(edge))
+        if line is not None:
+            tcPr.remove(line)
+    for edge, visible in (('a:lnL', False), ('a:lnR', False), ('a:lnT', False), ('a:lnB', True)):
+        line = etree.SubElement(tcPr, qn(edge), w='6350' if visible else '0')
+        if visible:
+            etree.SubElement(etree.SubElement(line, qn('a:solidFill')), qn('a:srgbClr'), val=BORDER)
+        else:
+            etree.SubElement(line, qn('a:noFill'))
+    # Borders must precede the cell fill in tcPr.
+    for edge in ('a:lnB', 'a:lnT', 'a:lnR', 'a:lnL'):
+        tcPr.insert(0, tcPr.find(qn(edge)))
+
+
+def _equipment_table(slide, rows, top):
+    height = ROW_H * (len(rows) + 1)
+    frame = slide.shapes.add_table(len(rows) + 1, len(COLUMNS), Emu(LEFT + CARD_PAD), Emu(top),
+                                   Emu(WIDTH - 2 * CARD_PAD), Emu(height))
+    table = frame.table
+    style = frame._element.graphic.graphicData.tbl.tblPr.find(qn('a:tableStyleId'))
+    if style is not None:
+        style.getparent().remove(style)
+    table.first_row = table.horz_banding = False
+    for index, (title, width) in enumerate(COLUMNS):
+        table.columns[index].width = Emu(width)
+        _cell(table.cell(0, index), title, 8.5, MUTED, bold=True, spacing=200,
+              align=PP_ALIGN.RIGHT if title == 'QTY' else PP_ALIGN.LEFT)
+    for r, values in enumerate(rows, start=1):
+        for c, value in enumerate(values):
+            _cell(table.cell(r, c), value, 10.5, SLATE, bold=(c == 0), fill=BAND if r % 2 == 0 else None,
+                  align=PP_ALIGN.RIGHT if c == len(values) - 1 else PP_ALIGN.LEFT)
+    for row in table.rows:
+        row.height = Emu(ROW_H)
+
+
+def inventory_slides(prs, p):
+    path_slide, rates_slide = prs.slides[CURRENT_STATE_SLIDE], prs.slides[RATES_SLIDE]
+    rows = [(a.kind, a.description, a.location or '—', str(a.quantity)) for a in p.assets] or \
+           [('—', 'No equipment listed', '—', '0')]
+    first_capacity = (CARD_BOTTOM - (TILE_TOP + TILE_H + 137160) - CARD_HEADER - 2 * 91440) // ROW_H - 1
+    later_capacity = (CARD_BOTTOM - TILE_TOP - CARD_HEADER - 2 * 91440) // ROW_H - 1
+    chunks, start = [], 0
+    while start < len(rows) or not chunks:
+        size = first_capacity if not chunks else later_capacity
+        chunks.append(rows[start:start + size])
+        start += size
+    for number, chunk in enumerate(chunks):
+        slide = prs.slides.add_slide(path_slide.slide_layout)
+        for shape_id in (2, 3, 4, 26):  # Logo, eyebrow, title, footer.
+            _clone(path_slide, shape_id, slide)
+        eyebrow, title = slide.shapes[1], slide.shapes[2]
+        _set_text(eyebrow, 'YOUR ENVIRONMENT')
+        _set_text(title, 'Inventory Recap' + (' (continued)' if number else ''))
+        card_top = TILE_TOP
+        if number == 0:
+            tiles = [('USERS', p.users, 'Supported users'), ('WORKSTATIONS', p.workstations, 'Desktops & laptops'),
+                     ('SERVERS', p.servers, 'Physical & cloud'), ('NETWORKS', p.networks, 'Managed networks'),
+                     ('MOBILE', p.mobile_devices, 'Phones & tablets')]
+            width = (WIDTH - TILE_GAP * (len(tiles) - 1)) / len(tiles)
+            for index, (label, value, caption) in enumerate(tiles):
+                x = LEFT + index * (width + TILE_GAP)
+                ids = (5, 6, 7, 9) if index % 2 == 0 else (10, 11, 12, 14)  # Green and navy tiles.
+                box, top_label, figure, note = (_clone(rates_slide, i, slide) for i in ids)
+                _place(box, x, TILE_TOP, width, TILE_H)
+                _set_text(_place(top_label, x + 164592, TILE_TOP + 118872, width - 329184, 228600), label)
+                for run in top_label._element.iter(qn('a:rPr')):
+                    run.set('spc', '150')  # Five tiles are narrower than the two on slide 13.
+                _set_text(_place(figure, x + 164592, TILE_TOP + 338328, width - 329184, 457200), str(value))
+                _set_text(_place(note, x + 164592, TILE_TOP + 777240, width - 329184, 182880), caption)
+            card_top = TILE_TOP + TILE_H + 137160
+        card, bar, heading = (_clone(path_slide, i, slide) for i in (5, 6, 7))
+        _place(card, LEFT, card_top, WIDTH, CARD_BOTTOM - card_top)
+        _place(bar, LEFT, card_top, WIDTH, CARD_HEADER)
+        _set_text(_place(heading, LEFT, card_top, WIDTH, CARD_HEADER), 'EQUIPMENT IN SCOPE')
+        _equipment_table(slide, chunk, card_top + CARD_HEADER + 91440)
+
+
 def pptx_bytes(p, q):
     prs = Presentation(TEMPLATES / 'proposal.pptx')
     security, backup, core = monthly_lines(q, 'security'), monthly_lines(q, 'backup'), monthly_lines(q, 'core')
@@ -178,6 +319,7 @@ def pptx_bytes(p, q):
                         for run in para.runs:
                             if p.client in run.text:
                                 run.font.size = Pt(20)
+    inventory_slides(prs, p)
     prs.core_properties.title = f'Managed IT services proposal - {p.client}'
     stream = io.BytesIO()
     prs.save(stream)

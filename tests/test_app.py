@@ -35,7 +35,7 @@ def test_example_totals():
     assert q['term_total']==Decimal('15260.00')
 
 def test_billing_modes_and_tax_allocation():
-    p=example();p.user_rate=Decimal('100');p.billing_mode='users';p.extras=[];p.user_taxable=True
+    p=example();p.user_rate=Decimal('100');p.billing_mode='users';p.security_quantity=p.backup_quantity=0;p.user_taxable=True
     p.tax_percent=Decimal('8');p.discount=Decimal('20')
     assert quote(p)['monthly']==Decimal('194.40')
     p.billing_mode='combined';p.workstation_taxable=False;p.server_taxable=False
@@ -75,7 +75,7 @@ def test_auth_save_reload_and_download():
         assert 'ninety (90) days' in ' '.join(text.split())
         slides=deck_text(z.read('Different Client & Co_IT_Proposal.pptx'))
         all_text=' '.join(slides)
-        assert len(slides)==14
+        assert len(slides)==15 and 'Inventory Recap' in slides[14]
         assert 'ProjectCenter' not in all_text
         assert '{{' not in all_text
         assert '$410.00' in slides[11] and '4  Devices × $80.00' in slides[11] and '2 users × $25.00' in slides[11]
@@ -85,24 +85,64 @@ def test_auth_save_reload_and_download():
         assert c.post('/api/logout').status_code==200
         assert c.get('/api/proposals').status_code==401
 
+def slide_signature(slide):
+    """Geometry and text of every shape, including those inside groups."""
+    def walk(shapes):
+        for s in shapes:
+            yield (s.shape_id,s.left,s.top,s.width,s.height,s.text_frame.text if s.has_text_frame else '')
+            if s.shape_type==6:yield from walk(s.shapes)
+    return sorted(walk(slide.shapes),key=str)
+
+def test_example_reproduces_reference_deck():
+    """Slides 1-14 generated from example.json must match the sanitized copy of the completed reference deck."""
+    p=example();deck=Presentation(io.BytesIO(pptx_bytes(p,quote(p))))
+    reference=Presentation(TEMPLATES/'reference'/'Example_IT_Proposal.pptx')
+    assert len(reference.slides)==14 and len(deck.slides)==15
+    for index,(made,expected) in enumerate(zip(deck.slides,reference.slides),start=1):
+        assert slide_signature(made)==slide_signature(expected),f'slide {index} differs from the reference'
+
+def test_inventory_recap_slides():
+    from app.models import Asset
+    p=example();p.networks=2;p.mobile_devices=4
+    slides=deck_text(pptx_bytes(p,quote(p)))
+    assert 'Inventory Recap' in slides[14] and 'EQUIPMENT IN SCOPE' in slides[14]
+    for label in ['USERS','WORKSTATIONS','SERVERS','NETWORKS','MOBILE']:assert label in slides[14]
+    table=[s for s in Presentation(io.BytesIO(pptx_bytes(p,quote(p)))).slides[14].shapes if s.has_table][0].table
+    assert [c.text for c in table.rows[1].cells]==['Workstation','Desktops / laptops','—','3']
+    p.assets=[Asset(kind='Workstation',description=f'Laptop {i}',quantity=1) for i in range(15)]
+    deck=Presentation(io.BytesIO(pptx_bytes(p,quote(p))))
+    cells=lambda slide:[c.text for s in slide.shapes if s.has_table for r in s.table.rows for c in r.cells]
+    assert len(deck.slides)==16 and 'Inventory Recap (continued)' in deck_text(pptx_bytes(p,quote(p)))[15]
+    assert 'Laptop 5' in cells(deck.slides[14]) and 'Laptop 14' in cells(deck.slides[15])
+
+def test_older_drafts_move_charges_into_cards():
+    data=example().model_dump(mode='json')
+    for key in [k for k in data if k.startswith(('security_','backup_'))]:del data[key]
+    data['extras']=[dict(description='Cybersecurity protection',quantity=2,rate='25'),dict(description='Cloud-to-cloud backup',quantity=3,rate='20',category='backup'),
+                    dict(description='Printer lease',quantity=1,rate='40')]
+    p=Proposal(**data)
+    assert (p.security_quantity,p.security_rate,p.backup_quantity,p.backup_rate)==(2,Decimal('25'),3,Decimal('20'))
+    assert [x.description for x in p.extras]==['Printer lease']
+    assert any('Printer lease' in w for w in quote(p)['warnings'])
+
 def test_long_content_keeps_reference_layout():
     p=example();p.client='A long client company name that should wrap cleanly in the proposal';p.needs='Long discovery note. '*90
     from app.models import Line
     p.extras=[Line(description='Additional support service '+str(i),quantity=2,rate='10') for i in range(30)]
     q=quote(p)
-    assert any('Not itemised on the pricing slide' in w for w in q['warnings'])
-    assert len(deck_text(pptx_bytes(p,q)))==14
+    assert any('not itemised on the pricing slide' in w for w in q['warnings'])
+    assert len(deck_text(pptx_bytes(p,q)))==15
     assert p.client in docx_text(docx_bytes(p,q))
 
 def test_pricing_cards_and_schedule_b():
-    from app.models import Line,Service
+    from app.models import Service
     p=example();p.billing_mode='combined';p.users=12;p.user_rate=Decimal('45');p.current_state='Aging firewall\nNo tested backups'
-    p.extras=[Line(description='Datto backup',quantity=3,rate='30',category='backup',unit='devices')]
+    p.security_quantity=0;p.backup_quantity=3;p.backup_unit='devices';p.backup_rate=Decimal('30')
     p.services=[Service(description='Manage Servers',frequency='Weekly',status='Excluded'),Service(description='Quarterly vCIO review',frequency='Quarterly')]
     q=quote(p);slides=deck_text(pptx_bytes(p,q))
     assert 'Aging firewall' in slides[10] and 'No tested backups' in slides[10]
     assert '12 Users / 4 Devices' in slides[11] and '3 devices × $30.00' in slides[11]
-    assert 'Cybersecurity' not in slides[11].split('Backup Services')[-1]  # Protection card removed when there is no security charge.
+    assert 'PROTECTION' not in slides[11]  # Card removed when there is no cybersecurity charge.
     doc=Document(io.BytesIO(docx_bytes(p,q)))
     rows=[[c.text.strip() for c in r.cells] for t in doc.tables[2:4] for r in t.rows]
     services=[(r[0],r[-1]) for r in rows if r[-1] in ('YES','NO','NA')]
