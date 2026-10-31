@@ -23,6 +23,7 @@ from pptx import Presentation
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
+from app.generate import bullets  # noqa: E402
 from app.textfill import fill_lines, paragraphs, replace, replace_all, replace_regex, text  # noqa: E402
 
 out = root / 'templates'
@@ -39,6 +40,9 @@ SLIDE_VALUES = {
     12: {7: ('$135', '{{hourly_rate}}'), 12: ('$202', '{{after_hours_rate}}')},
 }
 LEAK_PATTERNS = [r'\$\d', r'\d+\s+users?\s+×']
+# Layout corrections to the reference deck (v0.5.0), applied to the template and the example alike.
+MONTH_LABEL = (11, 8, 2331720, 274320)  # Slide 12 "/ month": moved below the headline figure (top, height).
+STRAY_SHAPES = {12: [26, 28, 31, 36, 38]}  # Slide 13: leftover divider lines and check marks near the bottom.
 
 
 def all_shapes(shapes):
@@ -46,6 +50,17 @@ def all_shapes(shapes):
         yield shape
         if shape.shape_type == 6:
             yield from all_shapes(shape.shapes)
+
+
+def polish(prs):
+    """Fix the reference deck's layout slips: the overlapping "/ month" label and stray shapes."""
+    index, shape_id, top, height = MONTH_LABEL
+    by_id = {s.shape_id: s for s in all_shapes(prs.slides[index].shapes)}
+    by_id[shape_id].top, by_id[shape_id].height = top, height
+    for index, ids in STRAY_SHAPES.items():
+        for shape in list(all_shapes(prs.slides[index].shapes)):
+            if shape.shape_id in ids:
+                shape._element.getparent().remove(shape._element)
 
 
 def set_shape_value(shape, old, token):
@@ -78,6 +93,7 @@ def prepare_presentation(path, client, month):
                 # Slide numbers ("11 / 14") are removed from every slide.
                 if re.fullmatch(r'\s*\d+\s*/\s*\d+\s*', shape.text_frame.text):
                     shape._element.getparent().remove(shape._element)
+    polish(prs)
     prs.core_properties.title = 'TeamLogic IT proposal template'
     prs.core_properties.author = 'TeamLogic IT Scottsdale'
     prs.core_properties.last_modified_by = 'TeamLogic IT Scottsdale'
@@ -101,11 +117,11 @@ def write_reference(path, client, month):
         by_id = {s.shape_id: s for s in all_shapes(slide.shapes)}
         if index == 10:  # Current-state bullets.
             paras = by_id[8].text_frame.paragraphs
-            bullets = [p for p in paras if p.text.strip()]
-            for p in bullets[1:]:
+            filled = [p for p in paras if p.text.strip()]
+            for p in filled[1:]:
                 p._p.getparent().remove(p._p)
-            lines = [line for line in example['current_state'].splitlines() if line.strip()]
-            fill_lines(bullets[0]._p, bullets[0].text, lines)
+            lines = bullets(example['current_state']) + bullets(example.get('needs', ''))
+            fill_lines(filled[0]._p, filled[0].text, lines)
         if index == 11:  # Backup card label (the client's cloud provider).
             set_shape_value(by_id[31], SLIDE_VALUES[11][31][0], example.get('backup_label', 'Cloud'))
         for shape in list(all_shapes(slide.shapes)):
@@ -114,6 +130,7 @@ def write_reference(path, client, month):
                     replace(p, client, example['client'])
                 if re.fullmatch(r'\s*\d+\s*/\s*\d+\s*', shape.text_frame.text):
                     shape._element.getparent().remove(shape._element)
+    polish(prs)
     props = prs.core_properties
     props.title = f'TeamLogic IT — Managed Services Proposal — {example["client"]}'
     props.author = props.last_modified_by = 'TeamLogic IT Scottsdale'

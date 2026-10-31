@@ -6,6 +6,7 @@ Design and formatting come entirely from templates/proposal.pptx and templates/a
 """
 import copy
 import io
+import re
 from collections import OrderedDict
 from decimal import Decimal
 from pathlib import Path
@@ -29,6 +30,7 @@ STATUS = {'Included': 'YES', 'Excluded': 'NO', 'Not applicable': 'NA'}
 SECURITY_CARD = [5]
 BACKUP_CARD = [9, 10, 15, 16, 17, 19, 6, 13, 31, 36]
 PRICING_SLIDE, CURRENT_STATE_SLIDE, RATES_SLIDE = 11, 10, 12
+ENVIRONMENT_SLIDE = 11  # Where the generated Your Environment slide(s) go: right after Current State.
 
 
 def money(x):
@@ -102,14 +104,53 @@ def fee_components(q):
     return ', '.join(parts)
 
 
+def bullets(value):
+    """One bullet per line, and per comma- or semicolon-separated item within a line."""
+    return [item.strip() for line in value.splitlines() for item in re.split(r'[,;]', line) if item.strip()]
+
+
 def current_state(p):
-    lines = [line.strip() for line in p.current_state.splitlines() if line.strip()]
-    if lines:
-        return lines
-    derived = [f'{p.workstations} desktops/laptops'] if p.workstations else []
-    if p.servers:
-        derived.append(f'{p.servers} server{"s" if p.servers != 1 else ""}')
-    return derived or ['']
+    """Current State bullets: the entered current state (or the device counts), then the pain points."""
+    lines = bullets(p.current_state)
+    if not lines:
+        lines = [f'{p.workstations} desktops/laptops'] if p.workstations else []
+        if p.servers:
+            lines.append(f'{p.servers} server{"s" if p.servers != 1 else ""}')
+    lines += bullets(p.needs)
+    return lines or ['']
+
+
+CURRENT_STATE_FIT = 10  # Bullets that fit the Current State card at the reference 11.5 pt.
+
+
+def fit_bullets(shape, count):
+    """Shrink the Current State bullets when there are more than fit at the reference size."""
+    if count <= CURRENT_STATE_FIT:
+        return
+    scale = max(CURRENT_STATE_FIT / count, 0.6)
+    for para in shape.text_frame.paragraphs:
+        for run in para.runs:
+            if run.font.size:
+                run.font.size = int(run.font.size * scale)
+        for spc in para._p.iter(qn('a:spcPts')):
+            spc.set('val', str(int(int(spc.get('val')) * scale)))
+
+
+CLIENT_FIT = 26  # Characters of the 48 pt client name that fit on one line of the closing slide.
+
+
+def fit_client(shape, client):
+    """Shrink a long client name on the closing slide so it stays on one line below "Thank you,";
+    names too long even at the minimum size wrap downward instead of growing into the line above."""
+    if len(client) <= CLIENT_FIT:
+        return
+    size = max(48 * CLIENT_FIT / len(client), 22)
+    for para in shape.text_frame.paragraphs:
+        for run in para.runs:
+            run.font.size = Pt(size)
+    if size * len(client) > 48 * CLIENT_FIT:  # Still wraps at the minimum size.
+        shape.text_frame.word_wrap = True
+        shape.text_frame.vertical_anchor = MSO_ANCHOR.TOP
 
 
 def fill_tokens(root, values, multiline=None):
@@ -246,7 +287,17 @@ def _equipment_table(slide, rows, top):
 
 
 def inventory_slides(prs, p):
+    """Append the Your Environment slide(s), then move them to just after Current State."""
     path_slide, rates_slide = prs.slides[CURRENT_STATE_SLIDE], prs.slides[RATES_SLIDE]
+    before = len(prs.slides)
+    _build_inventory_slides(prs, p, path_slide, rates_slide)
+    id_list = prs.slides._sldIdLst
+    for offset, entry in enumerate(list(id_list)[before:]):
+        id_list.remove(entry)
+        id_list.insert(ENVIRONMENT_SLIDE + offset, entry)
+
+
+def _build_inventory_slides(prs, p, path_slide, rates_slide):
     rows = [(a.kind, a.description, a.location or '—', str(a.quantity)) for a in p.assets] or \
            [('—', 'No equipment listed', '—', '0')]
     first_capacity = (CARD_BOTTOM - (TILE_TOP + TILE_H + 137160) - CARD_HEADER - 2 * 91440) // ROW_H - 1
@@ -261,8 +312,8 @@ def inventory_slides(prs, p):
         for shape_id in (2, 3, 4, 26):  # Logo, eyebrow, title, footer.
             _clone(path_slide, shape_id, slide)
         eyebrow, title = slide.shapes[1], slide.shapes[2]
-        _set_text(eyebrow, 'YOUR ENVIRONMENT')
-        _set_text(title, 'Inventory Recap' + (' (continued)' if number else ''))
+        _set_text(eyebrow, 'IN SCOPE')
+        _set_text(title, 'Your Environment' + (' (continued)' if number else ''))
         card_top = TILE_TOP
         if number == 0:
             tiles = [('USERS', p.users, 'Supported users'), ('WORKSTATIONS', p.workstations, 'Desktops & laptops'),
@@ -299,7 +350,8 @@ def pptx_bytes(p, q):
         '{{backup_label}}': p.backup_label, '{{backup_monthly}}': money(total(backup)), '{{backup_total}}': money(total(backup)),
         '{{hourly_rate}}': money_short(p.hourly_rate), '{{after_hours_rate}}': money_short(p.after_hours_rate),
     }
-    multiline = {'{{current_state}}': current_state(p), '{{core_detail}}': detail(core, '  ') or [''],
+    state = current_state(p)
+    multiline = {'{{current_state}}': state, '{{core_detail}}': detail(core, '  ') or [''],
                  '{{security_detail}}': detail(security) or [''], '{{backup_detail}}': detail(backup) or ['']}
     for index, slide in enumerate(prs.slides):
         if index == PRICING_SLIDE:
@@ -312,6 +364,10 @@ def pptx_bytes(p, q):
                 fill_tokens(shape._element, values, multiline)
                 if index == PRICING_SLIDE:
                     fit_heading(shape)
+                if index == CURRENT_STATE_SLIDE and shape.shape_id == 8:
+                    fit_bullets(shape, len(state))
+                if index == len(prs.slides) - 1 and shape.text_frame.text == p.client:
+                    fit_client(shape, p.client)
                 # Long company names wrap inside the original cover text box.
                 if index == 0 and p.client in shape.text_frame.text and len(p.client) > 30:
                     shape.text_frame.word_wrap = True

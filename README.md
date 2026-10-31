@@ -12,16 +12,16 @@ The template extraction helper (`scripts/prepare_templates.py`) builds `template
 
 | Output | Source in the wizard |
 |---|---|
-| Slide 11 "Current State" bullets | Discovery → Current state (one per line; blank lists workstation/server counts) |
-| Slide 12 headline, Core Support card | Sum of the cards (before tax); user/workstation/server rates |
-| Slide 12 Cybersecurity / Backup cards | Pricing step Cybersecurity and Backup boxes: quantity, unit, rate, provider label (a card with quantity 0 is removed) |
-| Slide 12 one-time setup, slide 13 hourly rates | Onboarding fee; onsite and after-hours rates |
-| Slide 15+ Inventory Recap | Counts from step 2 as tiles; equipment from step 4 as a table (continued on further slides past six rows) |
+| Slide 11 "Current State" bullets | Discovery → Current state (blank lists workstation/server counts), then Business needs & pain points; each line, and each comma- or semicolon-separated item, is its own bullet |
+| Slide 12 "Your Environment" | Counts from step 2 as tiles; equipment from step 4 as a table (continued on further slides past six rows) |
+| Slide 13 headline, Core Support card | Sum of the cards (before tax); user/workstation/server rates |
+| Slide 13 Cybersecurity / Backup cards | Pricing step Cybersecurity and Backup boxes: quantity, unit, rate, provider label (a card with quantity 0 is removed) |
+| Slide 13 one-time setup, slide 14 hourly rates | Onboarding fee; onsite and after-hours rates |
 | SOW cover, Schedule B, Schedule C | Client details, dates, term, fees; service scope (rows not in scope are removed, custom services added under "Additional Services"); hourly rates and covered equipment counts |
 
-The Pricing step asks for exactly the figures slide 12 shows, with a live preview of each card's line, so every amount is itemised. Fees are quoted before tax; tax is invoiced separately. Drafts from earlier versions have their cybersecurity and backup charges moved into the cards automatically; anything else (free-form charges, a discount) is shown in an "older draft" box with a warning until it is moved or removed. Discovery notes, exclusions and tax notes are kept with the proposal (and in `proposal-data.json`) but do not appear in either document.
+The Pricing step asks for exactly the figures slide 13 shows, with a live preview of each card's line, so every amount is itemised. Fees are quoted before tax; tax is invoiced separately. Drafts from earlier versions have their cybersecurity and backup charges moved into the cards automatically; anything else (free-form charges, a discount) is shown in an "older draft" box with a warning until it is moved or removed. Discovery notes, exclusions and tax notes are kept with the proposal (and in `proposal-data.json`) but do not appear in either document.
 
-`templates/reference/Example_IT_Proposal.pptx` is a copy of the completed ProjectCenter deck with the client's details replaced by the fictional values in `templates/example.json` (written by the prep script). A test requires slides 1–14 generated from `example.json` to match it shape for shape.
+`templates/reference/Example_IT_Proposal.pptx` is a copy of the completed ProjectCenter deck with the client's details replaced by the fictional values in `templates/example.json` (written by the prep script). The prep script also applies the v0.5.0 layout corrections (the pricing slide's "/ month" label and the stray shapes on the rates slide) to both the template and this copy. A test requires every generated slide except Your Environment to match it shape for shape.
 
 ## Local start
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.0 — Slide fixes
+
+- Current State (slide 11) now lists the Business needs & pain points after the current-state lines. Every line, and every comma- or semicolon-separated item within a line, is its own bullet; the list shrinks to fit when there are more than ten.
+- The Your Environment slide (formerly "Inventory Recap") moves from the end of the deck to slide 12, directly after Current State; pricing, rates and the closing slide shift down one.
+- Pricing slide: the "/ month" label no longer overlaps the monthly figure; it sits just below it.
+- Rates slide: removed the leftover divider lines and faint check marks near the bottom.
+- Closing slide: long client names shrink to stay on one line under "Thank you,"; names too long for the minimum size wrap downward instead of growing into it.
+- `scripts/prepare_templates.py` applies the pricing and rates slide corrections to both the template and the reference copy, so regenerating the templates reproduces them.
+
 ## v0.4.0 — Itemised pricing and inventory recap
 
 - The Pricing step mirrors the pricing slide: one box per card (Managed Services, Cybersecurity, Backup, one-time setup, hourly rates) with a live preview of the exact line each card shows. Free-form extra charges and the monthly discount are gone, so every figure on the slide comes from the wizard.
